@@ -1,0 +1,220 @@
+"""Training script for COICOP cascade classifier."""
+
+from __future__ import annotations
+
+import argparse
+import logging
+from pathlib import Path
+
+import mlflow
+
+from .cascade_classifier import CascadeCOICOPClassifier
+from .data_preparation import load_annotations
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+
+def train_cascade_classifier(
+    annotations_path: str,
+    output_dir: str,
+    model_name: str = "camembert-base",
+    embedding_dim: int = 128,
+    max_seq_length: int = 64,
+    batch_size: int = 32,
+    lr: float = 2e-5,
+    num_epochs: int = 20,
+    patience: int = 5,
+    min_samples: int = 50,
+    mlflow_experiment: str | None = None,
+) -> CascadeCOICOPClassifier:
+    """Train the cascade COICOP classifier.
+
+    Args:
+        annotations_path: Path to annotations.parquet file
+        output_dir: Directory to save trained models
+        model_name: HuggingFace model name for tokenizer
+        embedding_dim: Text embedding dimension
+        max_seq_length: Maximum sequence length
+        batch_size: Training batch size
+        lr: Learning rate
+        num_epochs: Maximum epochs per classifier
+        patience: Early stopping patience
+        min_samples: Minimum samples for sub-classifiers
+        mlflow_experiment: MLflow experiment name (optional)
+
+    Returns:
+        Trained CascadeCOICOPClassifier
+    """
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    # Load data
+    logger.info(f"Loading annotations from {annotations_path}...")
+    df = load_annotations(annotations_path, exclude_technical=True)
+    logger.info(f"Loaded {len(df)} samples (excluding 98.x and 99.x codes)")
+
+    # Log data statistics
+    unique_codes = df["code"].nunique()
+    unique_level1 = df["level1"].nunique()
+    logger.info(f"Unique codes: {unique_codes}")
+    logger.info(f"Level 1 categories: {unique_level1}")
+
+    # Initialize MLflow if experiment name provided
+    if mlflow_experiment:
+        mlflow.set_experiment(mlflow_experiment)
+        mlflow.start_run()
+        mlflow.log_params({
+            "model_name": model_name,
+            "embedding_dim": embedding_dim,
+            "max_seq_length": max_seq_length,
+            "batch_size": batch_size,
+            "lr": lr,
+            "num_epochs": num_epochs,
+            "patience": patience,
+            "min_samples": min_samples,
+            "num_samples": len(df),
+            "unique_codes": unique_codes,
+            "unique_level1": unique_level1,
+        })
+
+    # Create cascade classifier
+    classifier = CascadeCOICOPClassifier(
+        model_name=model_name,
+        embedding_dim=embedding_dim,
+        max_seq_length=max_seq_length,
+        min_samples=min_samples,
+    )
+
+    # Train
+    logger.info("Starting cascade classifier training...")
+    metrics = classifier.train(
+        df=df,
+        text_column="text",
+        code_column="code",
+        batch_size=batch_size,
+        lr=lr,
+        num_epochs=num_epochs,
+        patience=patience,
+        save_dir=str(output_path / "checkpoints"),
+    )
+
+    # Log metrics to MLflow
+    if mlflow_experiment:
+        mlflow.log_metrics({
+            "level1_num_classes": metrics["level1"]["num_classes"],
+            "level1_train_samples": metrics["level1"]["train_samples"],
+            "level1_val_samples": metrics["level1"]["val_samples"],
+            "num_sub_classifiers": len(metrics["sub_classifiers"]),
+        })
+
+        for code, sub_metrics in metrics["sub_classifiers"].items():
+            mlflow.log_metrics({
+                f"sub_{code}_num_classes": sub_metrics["num_classes"],
+                f"sub_{code}_train_samples": sub_metrics["train_samples"],
+            })
+
+    # Save the complete cascade classifier
+    classifier.save(output_path / "model")
+    logger.info(f"Model saved to {output_path / 'model'}")
+
+    if mlflow_experiment:
+        mlflow.log_artifact(str(output_path / "model"))
+        mlflow.end_run()
+
+    return classifier
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Train COICOP cascade classifier"
+    )
+    parser.add_argument(
+        "--annotations",
+        type=str,
+        default="data/annotations.parquet",
+        help="Path to annotations parquet file",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="models",
+        help="Output directory for trained models",
+    )
+    parser.add_argument(
+        "--model-name",
+        type=str,
+        default="camembert-base",
+        help="HuggingFace model name for tokenizer",
+    )
+    parser.add_argument(
+        "--embedding-dim",
+        type=int,
+        default=128,
+        help="Text embedding dimension",
+    )
+    parser.add_argument(
+        "--max-seq-length",
+        type=int,
+        default=64,
+        help="Maximum sequence length",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=32,
+        help="Training batch size",
+    )
+    parser.add_argument(
+        "--lr",
+        type=float,
+        default=2e-5,
+        help="Learning rate",
+    )
+    parser.add_argument(
+        "--num-epochs",
+        type=int,
+        default=20,
+        help="Maximum number of epochs",
+    )
+    parser.add_argument(
+        "--patience",
+        type=int,
+        default=5,
+        help="Early stopping patience",
+    )
+    parser.add_argument(
+        "--min-samples",
+        type=int,
+        default=50,
+        help="Minimum samples for sub-classifiers",
+    )
+    parser.add_argument(
+        "--mlflow-experiment",
+        type=str,
+        default=None,
+        help="MLflow experiment name (optional)",
+    )
+
+    args = parser.parse_args()
+
+    train_cascade_classifier(
+        annotations_path=args.annotations,
+        output_dir=args.output_dir,
+        model_name=args.model_name,
+        embedding_dim=args.embedding_dim,
+        max_seq_length=args.max_seq_length,
+        batch_size=args.batch_size,
+        lr=args.lr,
+        num_epochs=args.num_epochs,
+        patience=args.patience,
+        min_samples=args.min_samples,
+        mlflow_experiment=args.mlflow_experiment,
+    )
+
+
+if __name__ == "__main__":
+    main()
