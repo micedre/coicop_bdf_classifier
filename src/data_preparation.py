@@ -9,6 +9,13 @@ from typing import TYPE_CHECKING
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
+from typing import List, Union
+import unidecode
+import json
+import os
+import numpy as np
+
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -65,6 +72,11 @@ def load_annotations(
         DataFrame with product text and hierarchical labels
     """
     df = pd.read_parquet(path)
+
+    with open(os.path.join(os.path.dirname(__file__), "./data/text/stopwords.json"), "r", encoding="utf-8") as json_file:
+        stopwords = json.load(json_file)
+
+    df = preprocess_text(df, 'product', stopwords)
 
     # The 'code' column contains the COICOP codes
     # 'coicop' column contains the label text (description)
@@ -193,3 +205,95 @@ def get_class_weights(labels: Sequence[str]) -> dict[str, float]:
         weights[label] = total / (n_classes * count)
 
     return weights
+
+
+
+def preprocess_text(
+    df: pd.DataFrame, text_feature: str, stopwords: Union[List[str], set[str]]
+) -> pd.DataFrame:
+    """
+    Pipeline principal de prétraitement textuel.
+
+    Args:
+        df: DataFrame contenant le texte à traiter.
+        text_feature: Nom de la colonne texte à prétraiter.
+        stopwords: Liste ou ensemble de mots à exclure.
+
+    Returns:
+        DataFrame prétraitée.
+    """
+    df[text_feature + "_orig"] = df[text_feature].copy()
+    df[text_feature] = df[text_feature].map(unidecode.unidecode)
+    df[text_feature] = df[text_feature].str.lower()
+    df = remove_noise(df, text_feature)
+    df = tokenize_and_clean(df, text_feature)
+    df = remove_empty_and_strip(df, text_feature)
+    df = remove_stopwords(df, text_feature, stopwords)
+    return df
+
+
+def remove_noise(df: pd.DataFrame, text_feature: str) -> pd.DataFrame:
+    """
+    Supprime le bruit textuel : mots inutiles, ponctuation, chiffres, etc.
+
+    Args:
+        df: DataFrame contenant la colonne texte.
+        text_feature: Nom de la colonne texte.
+
+    Returns:
+        DataFrame nettoyé.
+    """
+    lib_to_remove = r"\brien\b|\rien du tout\b"
+    words_to_remove = r"\brien\b|\rien du tout\b"
+
+    # On supprime les libellés vide de sens
+    df[text_feature] = df[text_feature].str.replace(lib_to_remove, "", regex=True)
+    # On supprime toutes les ponctuations
+    df[text_feature] = df[text_feature].str.replace(r"[^\w\s]+", " ", regex=True)
+    # On supprime les stopwords custom
+    df[text_feature] = df[text_feature].str.replace(words_to_remove, "", regex=True)
+    # CHIFFRES : QUOI FAIRE ? TEMPORAIREMENT ON SUPPRIME
+    df[text_feature] = df[text_feature].str.replace(r"[\d+]", " ", regex=True)
+    # On supprime les mots d'une seule lettre
+    df[text_feature] = df[text_feature].apply(
+        lambda x: " ".join([w for w in x.split() if len(w) > 1])
+    )
+    # On supprime les multiple space
+    df[text_feature] = df[text_feature].str.replace(r"\s\s+", " ", regex=True)
+    return df
+
+
+def tokenize_and_clean(df: pd.DataFrame, text_feature: str) -> pd.DataFrame:
+    """
+    Tokenise chaque texte, supprime les doublons tout en conservant l'ordre.
+
+    Args:
+        df: DataFrame contenant la colonne texte.
+        text_feature: Nom de la colonne texte.
+
+    Returns:
+        DataFrame avec texte nettoyé.
+    """
+    libs_token = [lib.split() for lib in df[text_feature].to_list()]
+    libs_token = [
+        sorted(set(libs_token[i]), key=libs_token[i].index)
+        for i in range(len(libs_token))
+    ]
+    df[text_feature] = [" ".join(libs_token[i]) for i in range(len(libs_token))]
+    return df
+
+
+def remove_empty_and_strip(df, text_feature):
+    df[text_feature] = df[text_feature].str.strip()
+    df[text_feature] = df[text_feature].replace(r"^\s*$", np.nan, regex=True)
+    df = df.dropna(subset=[text_feature])
+    return df
+
+
+def remove_stopwords(df, text_feature, stopwords):
+    libs_token = [lib.split() for lib in df[text_feature].to_list()]
+    df[text_feature] = [
+        " ".join([word for word in libs_token[i] if word not in stopwords])
+        for i in range(len(libs_token))
+    ]
+    return df

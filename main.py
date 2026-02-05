@@ -33,6 +33,29 @@ def cmd_train(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_train_hierarchical(args: argparse.Namespace) -> None:
+    """Train the hierarchical multi-level classifier."""
+    from src.train import train_hierarchical_classifier
+
+    train_hierarchical_classifier(
+        annotations_path=args.data,
+        output_dir=args.output,
+        ngram_min_n=args.ngram_min,
+        ngram_max_n=args.ngram_max,
+        ngram_num_tokens=args.ngram_vocab_size,
+        embedding_dim=args.embedding_dim,
+        max_seq_length=args.max_seq_length,
+        batch_size=args.batch_size,
+        lr=args.lr,
+        num_epochs=args.num_epochs,
+        patience=args.patience,
+        min_samples=args.min_samples,
+        use_parent_features=args.use_parent_features,
+        teacher_forcing_ratio=args.teacher_forcing_ratio,
+        mlflow_experiment=args.mlflow_experiment,
+    )
+
+
 def cmd_predict(args: argparse.Namespace) -> None:
     """Predict COICOP codes."""
     from src.predict import COICOPPredictor
@@ -52,6 +75,38 @@ def cmd_predict(args: argparse.Namespace) -> None:
         predictions = predictor.predict(args.texts)
         for pred in predictions:
             print(json.dumps(pred, ensure_ascii=False, indent=2))
+
+
+def cmd_predict_hierarchical(args: argparse.Namespace) -> None:
+    """Predict COICOP codes using hierarchical classifier."""
+    from src.predict import HierarchicalCOICOPPredictor
+
+    predictor = HierarchicalCOICOPPredictor(args.model)
+
+    if args.file:
+        # File-based prediction
+        predictor.predict_file(
+            input_path=args.file,
+            output_path=args.output,
+            text_column=args.text_column,
+            batch_size=args.batch_size,
+        )
+    else:
+        # Text-based prediction
+        if args.input:
+            texts = [args.input]
+        else:
+            texts = args.texts
+
+        predictions = predictor.predict(texts)
+        for pred in predictions:
+            # Format hierarchical output nicely
+            print(f"\nText: {pred['text']}")
+            print(f"Final code: {pred['code']} (confidence: {pred['confidence']:.2f})")
+            if "levels" in pred:
+                print("Level breakdown:")
+                for level_name, level_data in pred["levels"].items():
+                    print(f"  {level_name}: {level_data['code']} (conf: {level_data['confidence']:.2f})")
 
 
 def cmd_evaluate(args: argparse.Namespace) -> None:
@@ -181,6 +236,109 @@ def main() -> int:
     )
     train_parser.set_defaults(func=cmd_train)
 
+    # Train-hierarchical command
+    train_hier_parser = subparsers.add_parser(
+        "train-hierarchical",
+        help="Train the hierarchical multi-level classifier with n-gram tokenization",
+    )
+    train_hier_parser.add_argument(
+        "--data",
+        type=str,
+        default="data/data-train.parquet",
+        help="Path to training data (parquet or csv)",
+    )
+    train_hier_parser.add_argument(
+        "--output",
+        type=str,
+        default="checkpoints/hierarchical",
+        help="Output directory for trained models",
+    )
+    train_hier_parser.add_argument(
+        "--ngram-min",
+        type=int,
+        default=3,
+        help="Minimum n-gram size for tokenizer",
+    )
+    train_hier_parser.add_argument(
+        "--ngram-max",
+        type=int,
+        default=6,
+        help="Maximum n-gram size for tokenizer",
+    )
+    train_hier_parser.add_argument(
+        "--ngram-vocab-size",
+        type=int,
+        default=100000,
+        help="Vocabulary size for n-gram tokenizer",
+    )
+    train_hier_parser.add_argument(
+        "--embedding-dim",
+        type=int,
+        default=128,
+        help="Text embedding dimension",
+    )
+    train_hier_parser.add_argument(
+        "--max-seq-length",
+        type=int,
+        default=64,
+        help="Maximum sequence length",
+    )
+    train_hier_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=32,
+        help="Training batch size",
+    )
+    train_hier_parser.add_argument(
+        "--lr",
+        type=float,
+        default=2e-5,
+        help="Learning rate",
+    )
+    train_hier_parser.add_argument(
+        "--num-epochs",
+        type=int,
+        default=20,
+        help="Maximum number of epochs",
+    )
+    train_hier_parser.add_argument(
+        "--patience",
+        type=int,
+        default=5,
+        help="Early stopping patience",
+    )
+    train_hier_parser.add_argument(
+        "--min-samples",
+        type=int,
+        default=50,
+        help="Minimum samples per level",
+    )
+    train_hier_parser.add_argument(
+        "--use-parent-features",
+        action="store_true",
+        default=True,
+        help="Use parent predictions as categorical features (default: True)",
+    )
+    train_hier_parser.add_argument(
+        "--no-parent-features",
+        action="store_false",
+        dest="use_parent_features",
+        help="Disable parent prediction features",
+    )
+    train_hier_parser.add_argument(
+        "--teacher-forcing-ratio",
+        type=float,
+        default=0.8,
+        help="Ratio of ground truth to use during training (0.0-1.0)",
+    )
+    train_hier_parser.add_argument(
+        "--mlflow-experiment",
+        type=str,
+        default=None,
+        help="MLflow experiment name (optional)",
+    )
+    train_hier_parser.set_defaults(func=cmd_train_hierarchical)
+
     # Predict command
     predict_parser = subparsers.add_parser("predict", help="Predict COICOP codes")
     predict_parser.add_argument(
@@ -219,6 +377,54 @@ def main() -> int:
         help="Text(s) to classify (if not using --file)",
     )
     predict_parser.set_defaults(func=cmd_predict)
+
+    # Predict-hierarchical command
+    predict_hier_parser = subparsers.add_parser(
+        "predict-hierarchical",
+        help="Predict COICOP codes using hierarchical classifier",
+    )
+    predict_hier_parser.add_argument(
+        "--model",
+        type=str,
+        default="checkpoints/hierarchical/hierarchical_model",
+        help="Path to saved hierarchical model",
+    )
+    predict_hier_parser.add_argument(
+        "--input",
+        type=str,
+        default=None,
+        help="Single text to classify",
+    )
+    predict_hier_parser.add_argument(
+        "--file",
+        type=str,
+        default=None,
+        help="Input file for batch prediction",
+    )
+    predict_hier_parser.add_argument(
+        "--output",
+        type=str,
+        default="predictions_hierarchical.csv",
+        help="Output file for batch prediction",
+    )
+    predict_hier_parser.add_argument(
+        "--text-column",
+        type=str,
+        default="product",
+        help="Name of text column in input file",
+    )
+    predict_hier_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=64,
+        help="Batch size for prediction",
+    )
+    predict_hier_parser.add_argument(
+        "texts",
+        nargs="*",
+        help="Text(s) to classify (if not using --file or --input)",
+    )
+    predict_hier_parser.set_defaults(func=cmd_predict_hierarchical)
 
     # Evaluate command
     eval_parser = subparsers.add_parser("evaluate", help="Evaluate the classifier")

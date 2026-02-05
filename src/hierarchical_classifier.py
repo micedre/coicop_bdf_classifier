@@ -1,0 +1,751 @@
+"""Hierarchical multi-level COICOP classifier with n-gram support.
+
+This module implements a 5-level hierarchical classifier where:
+- Each level has its own classifier
+- Level N receives parent predictions from level N-1 as categorical features
+- Uses NGramTokenizer (character n-grams) for text representation
+"""
+
+from __future__ import annotations
+
+import logging
+import pickle
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import numpy as np
+from torchTextClassifiers import ModelConfig, TrainingConfig, torchTextClassifiers
+from torchTextClassifiers.tokenizers import NGramTokenizer
+
+if TYPE_CHECKING:
+    import pandas as pd
+
+logger = logging.getLogger(__name__)
+
+# COICOP hierarchy levels
+COICOP_LEVELS = ["level1", "level2", "level3", "level4", "level5"]
+
+
+@dataclass
+class HierarchicalConfig:
+    """Configuration for hierarchical COICOP classifier."""
+
+    # N-gram tokenizer settings
+    ngram_min_n: int = 3
+    ngram_max_n: int = 6
+    ngram_num_tokens: int = 100000
+
+    # Model settings
+    embedding_dim: int = 128
+    max_seq_length: int = 64
+
+    # Training settings
+    batch_size: int = 32
+    lr: float = 2e-5
+    num_epochs: int = 20
+    patience: int = 5
+
+    # Hierarchical settings
+    min_samples_per_level: int = 50
+    min_samples_per_class: int = 2
+    use_parent_features: bool = True
+    parent_embedding_dim: int = 32
+    confidence_buckets: int = 10
+
+    # Teacher forcing ratio (proportion using ground truth during training)
+    teacher_forcing_ratio: float = 0.8
+
+
+class HierarchicalCOICOPClassifier:
+    """5-level hierarchical classifier with parent prediction features.
+
+    Architecture:
+    - Level 1: Text-only classification (13 classes: 01-13)
+    - Levels 2-5: Text + parent_code embedding + confidence bucket
+
+    The parent code and confidence are passed as categorical features
+    using the CategoricalVariableNet from torchTextClassifiers.
+    """
+
+    def __init__(self, config: HierarchicalConfig | None = None):
+        """Initialize the hierarchical classifier.
+
+        Args:
+            config: Configuration settings. Uses defaults if None.
+        """
+        self.config = config or HierarchicalConfig()
+
+        # Level classifiers: {level_name: torchTextClassifiers}
+        self.level_classifiers: dict[str, torchTextClassifiers] = {}
+
+        # Shared tokenizer (trained once on full corpus)
+        self.tokenizer: NGramTokenizer | None = None
+
+        # Label mappings per level
+        self.level_label_names: dict[str, list[str]] = {}
+        self.level_label_to_idx: dict[str, dict[str, int]] = {}
+        self.level_idx_to_label: dict[str, dict[int, str]] = {}
+
+        # Parent code mappings for categorical features
+        # Maps level_name -> {parent_code: index}
+        self.parent_code_to_idx: dict[str, dict[str, int]] = {}
+
+        self._is_trained = False
+
+    def _init_tokenizer(self, texts: list[str]) -> None:
+        """Train NGramTokenizer on the full corpus.
+
+        Args:
+            texts: All training texts for vocabulary building.
+        """
+        logger.info(
+            f"Training NGramTokenizer (n={self.config.ngram_min_n}-{self.config.ngram_max_n}, "
+            f"vocab_size={self.config.ngram_num_tokens})..."
+        )
+        self.tokenizer = NGramTokenizer(
+            min_n=self.config.ngram_min_n,
+            max_n=self.config.ngram_max_n,
+            num_tokens=self.config.ngram_num_tokens,
+            training_text=texts,
+            output_dim=self.config.max_seq_length,
+        )
+        logger.info("Tokenizer training complete.")
+
+    def _discretize_confidence(self, confidence: np.ndarray) -> np.ndarray:
+        """Convert continuous confidence to discrete buckets.
+
+        Args:
+            confidence: Array of confidence values in [0, 1].
+
+        Returns:
+            Array of bucket indices in [0, num_buckets-1].
+        """
+        buckets = np.clip(
+            (confidence * self.config.confidence_buckets).astype(int),
+            0,
+            self.config.confidence_buckets - 1,
+        )
+        return buckets
+
+    def _extract_parent_code(self, code: str) -> str | None:
+        """Extract parent code from a COICOP code.
+
+        Args:
+            code: Full COICOP code (e.g., "01.1.2.3")
+
+        Returns:
+            Parent code or None for level 1.
+        """
+        parts = code.split(".")
+        if len(parts) <= 1:
+            return None
+        return ".".join(parts[:-1])
+
+    def _get_level_codes(self, df: pd.DataFrame, level_name: str) -> list[str]:
+        """Get unique codes for a specific level.
+
+        Args:
+            df: DataFrame with level columns.
+            level_name: Column name (e.g., 'level2').
+
+        Returns:
+            Sorted list of unique codes.
+        """
+        codes = df[level_name].dropna().unique().tolist()
+        return sorted(codes)
+
+    def _create_level_classifier(
+        self,
+        level_name: str,
+        num_classes: int,
+        parent_vocab_size: int | None = None,
+    ) -> torchTextClassifiers:
+        """Create a classifier for a specific level.
+
+        Args:
+            level_name: Level name for logging.
+            num_classes: Number of output classes.
+            parent_vocab_size: Size of parent code vocabulary (None for level 1).
+
+        Returns:
+            Configured torchTextClassifiers instance.
+        """
+        if parent_vocab_size is not None and self.config.use_parent_features:
+            # Two categorical variables: parent_code and confidence_bucket
+            categorical_vocabulary_sizes = [
+                parent_vocab_size,
+                self.config.confidence_buckets,
+            ]
+            categorical_embedding_dims = [
+                self.config.parent_embedding_dim,
+                8,  # Small embedding for confidence buckets
+            ]
+            logger.info(
+                f"  Creating classifier with categorical features: "
+                f"parent_vocab={parent_vocab_size}, conf_buckets={self.config.confidence_buckets}"
+            )
+        else:
+            categorical_vocabulary_sizes = None
+            categorical_embedding_dims = None
+            logger.info("  Creating classifier without categorical features")
+
+        model_config = ModelConfig(
+            embedding_dim=self.config.embedding_dim,
+            num_classes=num_classes,
+            categorical_vocabulary_sizes=categorical_vocabulary_sizes,
+            categorical_embedding_dims=categorical_embedding_dims,
+        )
+
+        return torchTextClassifiers(
+            tokenizer=self.tokenizer,
+            model_config=model_config,
+        )
+
+    def _prepare_input_with_features(
+        self,
+        texts: list[str],
+        parent_code_indices: np.ndarray | None,
+        confidence_buckets: np.ndarray | None,
+    ) -> np.ndarray:
+        """Prepare input array with text and categorical features.
+
+        For torchTextClassifiers with categorical features, the input format is:
+        X = [[text, cat1_idx, cat2_idx], ...]
+
+        Args:
+            texts: List of text strings.
+            parent_code_indices: Indices of parent codes (or None).
+            confidence_buckets: Discretized confidence buckets (or None).
+
+        Returns:
+            Input array suitable for the classifier.
+        """
+        if parent_code_indices is None or confidence_buckets is None:
+            # Level 1: text only
+            return np.array(texts)
+
+        # Levels 2-5: text + parent features
+        n = len(texts)
+        X = np.empty((n, 3), dtype=object)
+        X[:, 0] = texts
+        X[:, 1] = parent_code_indices
+        X[:, 2] = confidence_buckets
+
+        return X
+
+    def _generate_predictions_with_teacher_forcing(
+        self,
+        classifier: torchTextClassifiers,
+        texts: list[str],
+        ground_truth_codes: list[str],
+        label_to_idx: dict[str, int],
+        idx_to_label: dict[int, str],
+        parent_code_indices: np.ndarray | None = None,
+        confidence_buckets: np.ndarray | None = None,
+    ) -> tuple[list[str], np.ndarray]:
+        """Generate predictions with teacher forcing for training.
+
+        During training, we use a mix of ground truth and model predictions
+        to make the next level robust to cascading errors.
+
+        Args:
+            classifier: Trained classifier for this level.
+            texts: Input texts.
+            ground_truth_codes: True labels for this level.
+            label_to_idx: Label to index mapping.
+            idx_to_label: Index to label mapping.
+            parent_code_indices: Parent code indices (for levels 2-5).
+            confidence_buckets: Confidence buckets (for levels 2-5).
+
+        Returns:
+            Tuple of (predicted_codes, confidence_scores).
+        """
+        n = len(texts)
+
+        # Prepare input
+        X = self._prepare_input_with_features(texts, parent_code_indices, confidence_buckets)
+
+        # Get model predictions
+        result = classifier.predict(X, top_k=1)
+        pred_indices = result["prediction"].numpy().flatten()
+        pred_confidence = result["confidence"].numpy().flatten()
+
+        # Apply teacher forcing: use ground truth for some samples
+        mask = np.random.random(n) < self.config.teacher_forcing_ratio
+
+        # Convert predictions to codes
+        predicted_codes = []
+        final_confidence = np.zeros(n)
+
+        for i in range(n):
+            if mask[i] and ground_truth_codes[i] in label_to_idx:
+                # Use ground truth
+                predicted_codes.append(ground_truth_codes[i])
+                final_confidence[i] = 1.0  # Perfect confidence for ground truth
+            else:
+                # Use model prediction
+                pred_label = idx_to_label[pred_indices[i]]
+                predicted_codes.append(pred_label)
+                final_confidence[i] = pred_confidence[i]
+
+        return predicted_codes, final_confidence
+
+    def train(
+        self,
+        df: pd.DataFrame,
+        text_column: str = "text",
+        code_column: str = "code",
+        save_dir: str | None = None,
+    ) -> dict:
+        """Train all level classifiers sequentially.
+
+        Training proceeds L1 → L2 → L3 → L4 → L5, where each level
+        receives predictions from the previous level as features.
+
+        Args:
+            df: DataFrame with text and COICOP code columns.
+            text_column: Name of text column.
+            code_column: Name of full COICOP code column.
+            save_dir: Directory to save checkpoints during training.
+
+        Returns:
+            Dictionary with training metrics per level.
+        """
+        from sklearn.model_selection import train_test_split
+
+        from .data_preparation import extract_levels
+
+        # Ensure we have a copy with level columns
+        df = df.copy()
+
+        # Extract all level columns if not present
+        if "level1" not in df.columns:
+            levels = df[code_column].apply(extract_levels).apply(pd.Series)
+            df = pd.concat([df, levels], axis=1)
+
+        # Get all texts for tokenizer training
+        all_texts = df[text_column].tolist()
+        self._init_tokenizer(all_texts)
+
+        # Training metrics
+        metrics = {}
+
+        # Track parent predictions for next level
+        parent_predictions: list[str] | None = None
+        parent_confidence: np.ndarray | None = None
+
+        for level_idx, level_name in enumerate(COICOP_LEVELS):
+            logger.info(f"\n{'='*60}")
+            logger.info(f"Training {level_name.upper()} classifier")
+            logger.info(f"{'='*60}")
+
+            # Filter to samples that have this level defined
+            level_df = df[df[level_name].notna()].copy()
+
+            if len(level_df) < self.config.min_samples_per_level:
+                logger.warning(
+                    f"Skipping {level_name}: insufficient samples "
+                    f"({len(level_df)} < {self.config.min_samples_per_level})"
+                )
+                continue
+
+            # Get unique labels and build mappings
+            label_names = self._get_level_codes(level_df, level_name)
+
+            # Filter classes with enough samples
+            label_counts = level_df[level_name].value_counts()
+            valid_labels = label_counts[
+                label_counts >= self.config.min_samples_per_class
+            ].index.tolist()
+
+            if len(valid_labels) < 2:
+                logger.warning(f"Skipping {level_name}: fewer than 2 valid classes")
+                continue
+
+            # Filter to valid labels
+            level_df = level_df[level_df[level_name].isin(valid_labels)].copy()
+            label_names = sorted(valid_labels)
+
+            self.level_label_names[level_name] = label_names
+            self.level_label_to_idx[level_name] = {
+                label: idx for idx, label in enumerate(label_names)
+            }
+            self.level_idx_to_label[level_name] = {
+                idx: label for idx, label in enumerate(label_names)
+            }
+
+            num_classes = len(label_names)
+            logger.info(f"  Classes: {num_classes}, Samples: {len(level_df)}")
+
+            # Determine parent vocabulary for categorical features
+            use_parent = level_idx > 0 and self.config.use_parent_features
+
+            if use_parent:
+                # Get parent level name and build parent code vocabulary
+                parent_level = COICOP_LEVELS[level_idx - 1]
+
+                # Get unique parent codes from current level's data
+                parent_codes = sorted(
+                    level_df[parent_level].dropna().unique().tolist()
+                )
+                self.parent_code_to_idx[level_name] = {
+                    code: idx for idx, code in enumerate(parent_codes)
+                }
+                parent_vocab_size = len(parent_codes)
+                logger.info(f"  Parent vocabulary size: {parent_vocab_size}")
+            else:
+                parent_vocab_size = None
+
+            # Create classifier
+            classifier = self._create_level_classifier(
+                level_name, num_classes, parent_vocab_size
+            )
+
+            # Prepare training data
+            texts = level_df[text_column].tolist()
+            labels = level_df[level_name].tolist()
+            y = np.array([self.level_label_to_idx[level_name][l] for l in labels])
+
+            # Prepare parent features if needed
+            if use_parent:
+                parent_level = COICOP_LEVELS[level_idx - 1]
+
+                # Use ground truth parent codes for training (with noise from prev level)
+                # For first training pass, use ground truth parents
+                gt_parent_codes = level_df[parent_level].tolist()
+
+                if parent_predictions is not None and len(parent_predictions) == len(texts):
+                    # Mix with previous level's predictions (teacher forcing at parent level)
+                    # Use stored predictions from last level
+                    parent_code_list = []
+                    for i, idx in enumerate(level_df.index):
+                        if idx < len(parent_predictions) and np.random.random() < (1 - self.config.teacher_forcing_ratio):
+                            parent_code_list.append(parent_predictions[idx])
+                        else:
+                            parent_code_list.append(gt_parent_codes[i])
+                else:
+                    parent_code_list = gt_parent_codes
+
+                # Convert to indices (with fallback for unknown codes)
+                parent_code_indices = np.array([
+                    self.parent_code_to_idx[level_name].get(code, 0)
+                    for code in parent_code_list
+                ])
+
+                # Use uniform confidence for training (or from prev level if available)
+                if parent_confidence is not None and len(parent_confidence) == len(texts):
+                    conf_buckets = self._discretize_confidence(
+                        parent_confidence[level_df.index.values]
+                    )
+                else:
+                    # Use high confidence for ground truth
+                    conf_buckets = self._discretize_confidence(
+                        np.ones(len(texts)) * 0.9
+                    )
+            else:
+                parent_code_indices = None
+                conf_buckets = None
+
+            # Prepare input
+            X = self._prepare_input_with_features(texts, parent_code_indices, conf_buckets)
+
+            # Train/val split
+            indices = np.arange(len(texts))
+            train_idx, val_idx = train_test_split(
+                indices,
+                test_size=0.2,
+                random_state=42,
+                stratify=y,
+            )
+
+            X_train, X_val = X[train_idx], X[val_idx]
+            y_train, y_val = y[train_idx], y[val_idx]
+
+            logger.info(f"  Train: {len(train_idx)}, Val: {len(val_idx)}")
+
+            # Training config
+            save_path = None
+            if save_dir:
+                save_path = str(Path(save_dir) / level_name)
+
+            training_config = TrainingConfig(
+                num_epochs=self.config.num_epochs,
+                batch_size=self.config.batch_size,
+                lr=self.config.lr,
+                patience_early_stopping=self.config.patience,
+                save_path=save_path or f"hierarchical_{level_name}",
+            )
+
+            # Train
+            classifier.train(
+                X_train=X_train,
+                y_train=y_train,
+                X_val=X_val,
+                y_val=y_val,
+                training_config=training_config,
+                verbose=True,
+            )
+
+            self.level_classifiers[level_name] = classifier
+
+            # Store metrics
+            metrics[level_name] = {
+                "num_classes": num_classes,
+                "train_samples": len(train_idx),
+                "val_samples": len(val_idx),
+                "labels": label_names,
+            }
+
+            # Generate predictions for next level (on FULL dataset)
+            logger.info(f"  Generating predictions for next level...")
+            X_full = self._prepare_input_with_features(texts, parent_code_indices, conf_buckets)
+            result = classifier.predict(X_full, top_k=1)
+
+            # Store predictions indexed by original DataFrame index
+            pred_indices = result["prediction"].numpy().flatten()
+            pred_confidence = result["confidence"].numpy().flatten()
+
+            # Create arrays aligned with original df
+            parent_predictions = [""] * len(df)
+            parent_confidence = np.zeros(len(df))
+
+            for i, orig_idx in enumerate(level_df.index):
+                pred_label = self.level_idx_to_label[level_name][pred_indices[i]]
+                parent_predictions[orig_idx] = pred_label
+                parent_confidence[orig_idx] = pred_confidence[i]
+
+            parent_predictions = parent_predictions
+            parent_confidence = parent_confidence
+
+        self._is_trained = True
+
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Training complete: {len(self.level_classifiers)} level classifiers")
+        logger.info(f"{'='*60}")
+
+        return metrics
+
+    def predict(
+        self,
+        texts: list[str],
+        return_all_levels: bool = True,
+    ) -> dict:
+        """Cascade predictions through all 5 levels.
+
+        Args:
+            texts: List of text strings to classify.
+            return_all_levels: Whether to return predictions at each level.
+
+        Returns:
+            Dictionary with:
+                - final_code: Most specific predicted code
+                - final_level: Name of the deepest predicted level
+                - final_confidence: Confidence for final prediction
+                - all_levels: (if return_all_levels) dict of level predictions
+        """
+        if not self._is_trained:
+            raise RuntimeError("Classifier must be trained before prediction.")
+
+        n = len(texts)
+        all_levels: dict[str, dict] = {}
+
+        # Track parent info for cascade
+        parent_predictions: list[str] | None = None
+        parent_confidence: np.ndarray | None = None
+
+        final_code = [""] * n
+        final_confidence = np.zeros(n)
+        final_level = [""] * n
+
+        for level_idx, level_name in enumerate(COICOP_LEVELS):
+            if level_name not in self.level_classifiers:
+                continue
+
+            classifier = self.level_classifiers[level_name]
+            use_parent = (
+                level_idx > 0
+                and self.config.use_parent_features
+                and parent_predictions is not None
+            )
+
+            # Prepare input
+            if use_parent:
+                # Convert parent predictions to indices
+                parent_code_to_idx = self.parent_code_to_idx.get(level_name, {})
+                parent_code_indices = np.array([
+                    parent_code_to_idx.get(code, 0) for code in parent_predictions
+                ])
+                conf_buckets = self._discretize_confidence(parent_confidence)
+            else:
+                parent_code_indices = None
+                conf_buckets = None
+
+            X = self._prepare_input_with_features(texts, parent_code_indices, conf_buckets)
+
+            # Predict
+            result = classifier.predict(X, top_k=1)
+            pred_indices = result["prediction"].numpy().flatten()
+            pred_confidence = result["confidence"].numpy().flatten()
+
+            # Convert to labels
+            idx_to_label = self.level_idx_to_label[level_name]
+            predictions = [idx_to_label[idx] for idx in pred_indices]
+
+            # Store level results
+            all_levels[level_name] = {
+                "predictions": predictions,
+                "confidence": pred_confidence.tolist(),
+            }
+
+            # Update final predictions
+            for i in range(n):
+                final_code[i] = predictions[i]
+                final_confidence[i] = pred_confidence[i]
+                final_level[i] = level_name
+
+            # Prepare for next level
+            parent_predictions = predictions
+            parent_confidence = pred_confidence
+
+        result = {
+            "final_code": final_code,
+            "final_level": final_level,
+            "final_confidence": final_confidence.tolist(),
+        }
+
+        if return_all_levels:
+            result["all_levels"] = all_levels
+
+        return result
+
+    def predict_single(self, text: str) -> dict:
+        """Predict COICOP code for a single text with detailed output.
+
+        Args:
+            text: Single text string to classify.
+
+        Returns:
+            Dictionary with predictions at each level.
+        """
+        result = self.predict([text], return_all_levels=True)
+
+        output = {
+            "text": text,
+            "final_code": result["final_code"][0],
+            "final_confidence": result["final_confidence"][0],
+            "levels": {},
+        }
+
+        for level_name, level_data in result["all_levels"].items():
+            output["levels"][level_name] = {
+                "code": level_data["predictions"][0],
+                "confidence": level_data["confidence"][0],
+            }
+
+        return output
+
+    def save(self, path: str | Path) -> None:
+        """Save the hierarchical classifier.
+
+        Args:
+            path: Directory path to save all components.
+        """
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+
+        # Save tokenizer
+        tokenizer_path = path / "tokenizer.pkl"
+        with open(tokenizer_path, "wb") as f:
+            pickle.dump(self.tokenizer, f)
+
+        # Save each level classifier
+        classifiers_path = path / "classifiers"
+        classifiers_path.mkdir(exist_ok=True)
+
+        for level_name, classifier in self.level_classifiers.items():
+            classifier.save(classifiers_path / level_name)
+
+        # Save metadata
+        metadata = {
+            "config": {
+                "ngram_min_n": self.config.ngram_min_n,
+                "ngram_max_n": self.config.ngram_max_n,
+                "ngram_num_tokens": self.config.ngram_num_tokens,
+                "embedding_dim": self.config.embedding_dim,
+                "max_seq_length": self.config.max_seq_length,
+                "batch_size": self.config.batch_size,
+                "lr": self.config.lr,
+                "num_epochs": self.config.num_epochs,
+                "patience": self.config.patience,
+                "min_samples_per_level": self.config.min_samples_per_level,
+                "min_samples_per_class": self.config.min_samples_per_class,
+                "use_parent_features": self.config.use_parent_features,
+                "parent_embedding_dim": self.config.parent_embedding_dim,
+                "confidence_buckets": self.config.confidence_buckets,
+                "teacher_forcing_ratio": self.config.teacher_forcing_ratio,
+            },
+            "level_label_names": self.level_label_names,
+            "level_label_to_idx": self.level_label_to_idx,
+            "level_idx_to_label": {
+                level: {str(k): v for k, v in mapping.items()}
+                for level, mapping in self.level_idx_to_label.items()
+            },
+            "parent_code_to_idx": self.parent_code_to_idx,
+            "trained_levels": list(self.level_classifiers.keys()),
+        }
+
+        with open(path / "hierarchical_metadata.pkl", "wb") as f:
+            pickle.dump(metadata, f)
+
+        logger.info(f"Hierarchical classifier saved to {path}")
+
+    @classmethod
+    def load(cls, path: str | Path) -> HierarchicalCOICOPClassifier:
+        """Load a trained hierarchical classifier.
+
+        Args:
+            path: Directory path where model was saved.
+
+        Returns:
+            Loaded HierarchicalCOICOPClassifier instance.
+        """
+        path = Path(path)
+
+        # Load metadata
+        with open(path / "hierarchical_metadata.pkl", "rb") as f:
+            metadata = pickle.load(f)
+
+        # Create config from saved values
+        config = HierarchicalConfig(**metadata["config"])
+
+        # Create instance
+        instance = cls(config=config)
+
+        # Restore mappings
+        instance.level_label_names = metadata["level_label_names"]
+        instance.level_label_to_idx = metadata["level_label_to_idx"]
+        instance.level_idx_to_label = {
+            level: {int(k): v for k, v in mapping.items()}
+            for level, mapping in metadata["level_idx_to_label"].items()
+        }
+        instance.parent_code_to_idx = metadata["parent_code_to_idx"]
+
+        # Load tokenizer
+        with open(path / "tokenizer.pkl", "rb") as f:
+            instance.tokenizer = pickle.load(f)
+
+        # Load classifiers
+        classifiers_path = path / "classifiers"
+        for level_name in metadata["trained_levels"]:
+            instance.level_classifiers[level_name] = torchTextClassifiers.load(
+                classifiers_path / level_name
+            )
+
+        instance._is_trained = True
+
+        logger.info(
+            f"Hierarchical classifier loaded: {len(instance.level_classifiers)} levels"
+        )
+
+        return instance

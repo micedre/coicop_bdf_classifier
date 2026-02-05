@@ -10,6 +10,7 @@ import mlflow
 
 from .cascade_classifier import CascadeCOICOPClassifier
 from .data_preparation import load_annotations
+from .hierarchical_classifier import HierarchicalCOICOPClassifier, HierarchicalConfig
 
 logging.basicConfig(
     level=logging.INFO,
@@ -123,6 +124,134 @@ def train_cascade_classifier(
 
     if mlflow_experiment:
         mlflow.log_artifact(str(output_path / "model"))
+        mlflow.end_run()
+
+    return classifier
+
+
+def train_hierarchical_classifier(
+    annotations_path: str,
+    output_dir: str,
+    ngram_min_n: int = 3,
+    ngram_max_n: int = 6,
+    ngram_num_tokens: int = 100000,
+    embedding_dim: int = 128,
+    max_seq_length: int = 64,
+    batch_size: int = 32,
+    lr: float = 2e-5,
+    num_epochs: int = 20,
+    patience: int = 5,
+    min_samples: int = 50,
+    use_parent_features: bool = True,
+    teacher_forcing_ratio: float = 0.8,
+    mlflow_experiment: str | None = None,
+) -> HierarchicalCOICOPClassifier:
+    """Train the hierarchical multi-level COICOP classifier.
+
+    This classifier trains separate models for each COICOP level (1-5),
+    with each level receiving predictions from the parent level as
+    categorical features.
+
+    Args:
+        annotations_path: Path to annotations.parquet file
+        output_dir: Directory to save trained models
+        ngram_min_n: Minimum n-gram size for tokenizer
+        ngram_max_n: Maximum n-gram size for tokenizer
+        ngram_num_tokens: Vocabulary size for n-gram tokenizer
+        embedding_dim: Text embedding dimension
+        max_seq_length: Maximum sequence length
+        batch_size: Training batch size
+        lr: Learning rate
+        num_epochs: Maximum epochs per classifier
+        patience: Early stopping patience
+        min_samples: Minimum samples per level
+        use_parent_features: Whether to use parent predictions as features
+        teacher_forcing_ratio: Ratio of ground truth to use during training
+        mlflow_experiment: MLflow experiment name (optional)
+
+    Returns:
+        Trained HierarchicalCOICOPClassifier
+    """
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    # Load data
+    logger.info(f"Loading annotations from {annotations_path}...")
+    df = load_annotations(annotations_path, exclude_technical=True)
+    logger.info(f"Loaded {len(df)} samples (excluding 98.x and 99.x codes)")
+
+    # Log data statistics
+    unique_codes = df["code"].nunique()
+    unique_level1 = df["level1"].nunique()
+    logger.info(f"Unique codes: {unique_codes}")
+    logger.info(f"Level 1 categories: {unique_level1}")
+
+    # Initialize MLflow if experiment name provided
+    if mlflow_experiment:
+        mlflow.set_experiment(mlflow_experiment)
+        mlflow.start_run()
+        mlflow.log_params({
+            "classifier_type": "hierarchical",
+            "ngram_min_n": ngram_min_n,
+            "ngram_max_n": ngram_max_n,
+            "ngram_num_tokens": ngram_num_tokens,
+            "embedding_dim": embedding_dim,
+            "max_seq_length": max_seq_length,
+            "batch_size": batch_size,
+            "lr": lr,
+            "num_epochs": num_epochs,
+            "patience": patience,
+            "min_samples": min_samples,
+            "use_parent_features": use_parent_features,
+            "teacher_forcing_ratio": teacher_forcing_ratio,
+            "num_samples": len(df),
+            "unique_codes": unique_codes,
+            "unique_level1": unique_level1,
+        })
+
+    # Create config
+    config = HierarchicalConfig(
+        ngram_min_n=ngram_min_n,
+        ngram_max_n=ngram_max_n,
+        ngram_num_tokens=ngram_num_tokens,
+        embedding_dim=embedding_dim,
+        max_seq_length=max_seq_length,
+        batch_size=batch_size,
+        lr=lr,
+        num_epochs=num_epochs,
+        patience=patience,
+        min_samples_per_level=min_samples,
+        use_parent_features=use_parent_features,
+        teacher_forcing_ratio=teacher_forcing_ratio,
+    )
+
+    # Create and train classifier
+    classifier = HierarchicalCOICOPClassifier(config=config)
+
+    logger.info("Starting hierarchical classifier training...")
+    metrics = classifier.train(
+        df=df,
+        text_column="text",
+        code_column="code",
+        save_dir=str(output_path / "checkpoints"),
+    )
+
+    # Log metrics to MLflow
+    if mlflow_experiment:
+        for level_name, level_metrics in metrics.items():
+            mlflow.log_metrics({
+                f"{level_name}_num_classes": level_metrics["num_classes"],
+                f"{level_name}_train_samples": level_metrics["train_samples"],
+                f"{level_name}_val_samples": level_metrics["val_samples"],
+            })
+
+    # Save the complete classifier
+    model_path = output_path / "hierarchical_model"
+    classifier.save(model_path)
+    logger.info(f"Model saved to {model_path}")
+
+    if mlflow_experiment:
+        mlflow.log_artifact(str(model_path))
         mlflow.end_run()
 
     return classifier
