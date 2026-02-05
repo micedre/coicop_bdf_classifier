@@ -14,4 +14,6 @@ dependencies = [
     "langchain>=1.2.8",
     "langchain-experimental>=0.4.1",
     "langchain-openai>=0.3.0",
+    "beautifulsoup4>=4.14.3",
+    "requests>=2.32.5",
 ]

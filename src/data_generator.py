@@ -49,8 +49,7 @@ def get_llm_from_env(model_name: str | None = None) -> ChatOpenAI:
         raise ValueError(msg)
 
     base_url = os.environ.get("OPENAI_BASE_URL")
-    if model_name is None:
-        model_name = os.environ.get("OPENAI_MODEL", "gpt-oss:20b")
+    model_name = os.environ.get("OPENAI_MODEL", "gpt-oss:20b")
 
     logger.info(f"Configuring llm: {base_url} with model : {model_name}")
 
@@ -73,7 +72,7 @@ class COICOPSyntheticGenerator:
     def __init__(
         self,
         llm: BaseChatModel | None = None,
-        coicop_path: str | Path = "data/20260130-coicop_et_codes_techniques.csv",
+        coicop_path: str | Path = "data/coicop-2018_envoi_rmes_20251022.csv",
         examples_per_category: int = 10,
     ) -> None:
         """Initialize the synthetic data generator.
@@ -96,9 +95,32 @@ class COICOPSyntheticGenerator:
         return self._coicop_df
 
     def _load_coicop(self) -> pd.DataFrame:
-        """Load COICOP hierarchy from CSV."""
+        """Load COICOP hierarchy from CSV.
+
+        Supports multiple formats:
+        - Old format: columns (libelle, code)
+        - Enriched format: columns (libelle, code, url, description, comprend, ne_comprend_pas)
+        - RMES format: columns (tri, type, parent, code, label_en, label_fr, note_generale_*,
+          contenu_central_*, contenu_additionnel_*, note_exclusion_*)
+        """
         df = pd.read_csv(self.coicop_path, sep=";", encoding="utf-8")
-        df.columns = ["libelle", "code"]
+
+        # Detect and normalize different formats
+        if "label_fr" in df.columns:
+            # RMES format (coicop-2018_envoi_rmes_*.csv)
+            df = df.rename(columns={
+                "label_fr": "libelle",
+                "contenu_central_fr": "comprend",
+                "note_exclusion_fr": "ne_comprend_pas",
+                "note_generale_fr": "description",
+            })
+        elif "comprend" not in df.columns:
+            # Old simple format (libelle, code only)
+            df.columns = ["libelle", "code"]
+            df["comprend"] = None
+            df["ne_comprend_pas"] = None
+            df["description"] = None
+
         return df
 
     def _get_leaf_categories(self) -> pd.DataFrame:
@@ -126,25 +148,30 @@ class COICOPSyntheticGenerator:
         return df[mask].copy()
 
     def _build_generation_prompt(self) -> PromptTemplate:
-        """Build the prompt template for synthetic data generation."""
-        template = """Tu es un expert en classification des produits et services selon la nomenclature COICOP (Classification of Individual Consumption According to Purpose).
+        """Build the prompt template for synthetic data generation.
 
-Génère {num_examples} exemples réalistes de produits ou services qui appartiennent à la catégorie COICOP suivante:
+        The prompt includes optional sections for "comprend" (what the category includes)
+        and "ne_comprend_pas" (what it excludes) from INSEE COICOP descriptions.
+        """
+        template = """Tu es un expert en classification des produits et services selon la nomenclature COICOP.
+
+Génère {num_examples} exemples réalistes de produits ou services pour la catégorie COICOP suivante:
 
 Code COICOP: {code}
 Libellé: {libelle}
+{comprend_section}
+{ne_comprend_section}
 
-Pour chaque exemple, fournis un nom de produit ou une description courte et réaliste en français, comme on pourrait le trouver sur un ticket de caisse ou dans un relevé de dépenses.
-
-Les exemples doivent être:
-- Variés (différentes marques, variantes, formulations)
-- Réalistes (comme sur un vrai ticket de caisse)
-- En français
+INSTRUCTIONS:
+- Génère des noms de produits comme on les trouve sur un ticket de caisse ou relevé bancaire
+- UTILISE DES MARQUES RÉELLES connues en France (exemples: Nestlé, Nutella, Danone, Carrefour, Président, Lu, Panzani, Evian, Coca-Cola, etc.)
+- Varie les formulations: nom de marque seul, marque + produit, produit générique
 - Courts (1 à 5 mots généralement)
+- En français
 
-Exemples de produits pour cette catégorie:"""
+Exemples de produits (un par ligne):"""
         return PromptTemplate(
-            input_variables=["num_examples", "code", "libelle"],
+            input_variables=["num_examples", "code", "libelle", "comprend_section", "ne_comprend_section"],
             template=template,
         )
 
@@ -188,6 +215,8 @@ Produits (un par ligne):"""
         self,
         code: str,
         libelle: str,
+        comprend: str | None = None,
+        ne_comprend_pas: str | None = None,
         num_examples: int | None = None,
     ) -> list[dict[str, str]]:
         """Generate synthetic examples for a single COICOP category.
@@ -195,6 +224,8 @@ Produits (un par ligne):"""
         Args:
             code: COICOP code
             libelle: COICOP category label
+            comprend: INSEE description of what the category includes (optional)
+            ne_comprend_pas: INSEE description of what the category excludes (optional)
             num_examples: Number of examples (defaults to examples_per_category)
 
         Returns:
@@ -205,11 +236,17 @@ Produits (un par ligne):"""
 
         prompt = self._build_generation_prompt()
 
+        # Build optional context sections from INSEE descriptions
+        comprend_section = f"Cette catégorie comprend: {comprend}" if comprend else ""
+        ne_comprend_section = f"Cette catégorie NE comprend PAS: {ne_comprend_pas}" if ne_comprend_pas else ""
+
         # Format the prompt
         formatted_prompt = prompt.format(
             num_examples=num_examples,
             code=code,
             libelle=libelle,
+            comprend_section=comprend_section,
+            ne_comprend_section=ne_comprend_section,
         )
 
         # Generate using LLM
@@ -238,10 +275,32 @@ Produits (un par ligne):"""
         lines = response.strip().split("\n")
         products = []
 
+        # Patterns that indicate introductory/explanatory lines to skip
+        skip_patterns = [
+            "voici",
+            "voilà",
+            "exemples",
+            "catégorie",
+            "coicop",
+            "produits pour",
+            "produits de",
+            "ci-dessous",
+            "suivants",
+        ]
+
         for line in lines:
             # Clean up the line
             line = line.strip()
             if not line:
+                continue
+
+            # Skip introductory lines (check before removing prefixes)
+            line_lower = line.lower()
+            if any(pattern in line_lower for pattern in skip_patterns):
+                continue
+
+            # Skip lines that are too long (likely explanatory text, not product names)
+            if len(line) > 80:
                 continue
 
             # Remove common prefixes like "1.", "- ", "• ", etc.
@@ -296,11 +355,16 @@ Produits (un par ligne):"""
         for _, row in categories.iterrows():
             code = row["code"]
             libelle = row["libelle"]
+            # Extract enriched INSEE descriptions if available
+            comprend = row.get("comprend") if pd.notna(row.get("comprend")) else None
+            ne_comprend_pas = row.get("ne_comprend_pas") if pd.notna(row.get("ne_comprend_pas")) else None
 
             logger.info(f"Generating examples for {code}: {libelle}")
 
             try:
-                examples = self.generate_for_category(code, libelle)
+                examples = self.generate_for_category(
+                    code, libelle, comprend=comprend, ne_comprend_pas=ne_comprend_pas
+                )
                 all_examples.extend(examples)
                 logger.info(f"  Generated {len(examples)} examples")
             except Exception as e:
@@ -370,7 +434,7 @@ Produits (un par ligne):"""
 
 def generate_and_save(
     output_path: str | Path,
-    coicop_path: str | Path = "data/20260130-coicop_et_codes_techniques.csv",
+    coicop_path: str | Path = "data/coicop-2018_envoi_rmes_20251022.csv",
     examples_per_category: int = 10,
     level: int = 5,
     max_categories: int | None = None,
@@ -430,7 +494,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--coicop",
         type=str,
-        default="data/20260130-coicop_et_codes_techniques.csv",
+        default="data/coicop-2018_envoi_rmes_20251022.csv",
         help="Path to COICOP definitions CSV",
     )
     parser.add_argument(
