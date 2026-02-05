@@ -73,7 +73,7 @@ def load_annotations(
     """
     df = pd.read_parquet(path)
 
-    with open(os.path.join(os.path.dirname(__file__), "./data/text/stopwords.json"), "r", encoding="utf-8") as json_file:
+    with open("data/text/stopwords.json", "r", encoding="utf-8") as json_file:
         stopwords = json.load(json_file)
 
     df = preprocess_text(df, 'product', stopwords)
@@ -223,7 +223,7 @@ def preprocess_text(
         DataFrame prétraitée.
     """
     df[text_feature + "_orig"] = df[text_feature].copy()
-    df[text_feature] = df[text_feature].map(unidecode.unidecode)
+    df[text_feature] = df[text_feature].fillna("").map(unidecode.unidecode)
     df[text_feature] = df[text_feature].str.lower()
     df = remove_noise(df, text_feature)
     df = tokenize_and_clean(df, text_feature)

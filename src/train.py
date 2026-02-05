@@ -135,15 +135,15 @@ def train_hierarchical_classifier(
     ngram_min_n: int = 3,
     ngram_max_n: int = 6,
     ngram_num_tokens: int = 100000,
-    embedding_dim: int = 128,
+    embedding_dim: int = 50,
     max_seq_length: int = 64,
     batch_size: int = 32,
-    lr: float = 2e-5,
+    lr: float = 0.1,
     num_epochs: int = 20,
     patience: int = 5,
     min_samples: int = 50,
     use_parent_features: bool = True,
-    teacher_forcing_ratio: float = 0.8,
+    teacher_forcing_ratio: float = 0.9,
     mlflow_experiment: str | None = None,
 ) -> HierarchicalCOICOPClassifier:
     """Train the hierarchical multi-level COICOP classifier.
