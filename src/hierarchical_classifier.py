@@ -35,6 +35,8 @@ class HierarchicalConfig:
     ngram_min_n: int = 3
     ngram_max_n: int = 6
     ngram_num_tokens: int = 100000
+    ngram_min_count: int = 1  # Minimum count for n-gram to be included
+    ngram_len_word_ngrams: int = 1  # Length of word n-grams (1 = unigrams)
 
     # Model settings
     embedding_dim: int = 128
@@ -104,9 +106,11 @@ class HierarchicalCOICOPClassifier:
             f"vocab_size={self.config.ngram_num_tokens})..."
         )
         self.tokenizer = NGramTokenizer(
+            min_count=self.config.ngram_min_count,
             min_n=self.config.ngram_min_n,
             max_n=self.config.ngram_max_n,
             num_tokens=self.config.ngram_num_tokens,
+            len_word_ngrams=self.config.ngram_len_word_ngrams,
             training_text=texts,
             output_dim=self.config.max_seq_length,
         )
@@ -672,6 +676,8 @@ class HierarchicalCOICOPClassifier:
                 "ngram_min_n": self.config.ngram_min_n,
                 "ngram_max_n": self.config.ngram_max_n,
                 "ngram_num_tokens": self.config.ngram_num_tokens,
+                "ngram_min_count": self.config.ngram_min_count,
+                "ngram_len_word_ngrams": self.config.ngram_len_word_ngrams,
                 "embedding_dim": self.config.embedding_dim,
                 "max_seq_length": self.config.max_seq_length,
                 "batch_size": self.config.batch_size,
