@@ -335,9 +335,9 @@ class HierarchicalCOICOPClassifier:
         # Training metrics
         metrics = {}
 
-        # Track parent predictions for next level
-        parent_predictions: list[str] | None = None
-        parent_confidence: np.ndarray | None = None
+        # Track parent predictions for next level (as dicts keyed by DataFrame index)
+        parent_predictions: dict[int, str] | None = None
+        parent_confidence: dict[int, float] | None = None
 
         for level_idx, level_name in enumerate(COICOP_LEVELS):
             logger.info(f"\n{'='*60}")
@@ -419,12 +419,12 @@ class HierarchicalCOICOPClassifier:
                 # For first training pass, use ground truth parents
                 gt_parent_codes = level_df[parent_level].tolist()
 
-                if parent_predictions is not None and len(parent_predictions) == len(texts):
+                if parent_predictions is not None:
                     # Mix with previous level's predictions (teacher forcing at parent level)
                     # Use stored predictions from last level
                     parent_code_list = []
                     for i, idx in enumerate(level_df.index):
-                        if idx < len(parent_predictions) and np.random.random() < (1 - self.config.teacher_forcing_ratio):
+                        if idx in parent_predictions and np.random.random() < (1 - self.config.teacher_forcing_ratio):
                             parent_code_list.append(parent_predictions[idx])
                         else:
                             parent_code_list.append(gt_parent_codes[i])
@@ -438,10 +438,12 @@ class HierarchicalCOICOPClassifier:
                 ])
 
                 # Use uniform confidence for training (or from prev level if available)
-                if parent_confidence is not None and len(parent_confidence) == len(texts):
-                    conf_buckets = self._discretize_confidence(
-                        parent_confidence[level_df.index.values]
-                    )
+                if parent_confidence is not None:
+                    # Get confidence values for current level's samples
+                    conf_values = np.array([
+                        parent_confidence.get(idx, 0.9) for idx in level_df.index
+                    ])
+                    conf_buckets = self._discretize_confidence(conf_values)
                 else:
                     # Use high confidence for ground truth
                     conf_buckets = self._discretize_confidence(
@@ -510,17 +512,15 @@ class HierarchicalCOICOPClassifier:
             pred_indices = result["prediction"].numpy().flatten()
             pred_confidence = result["confidence"].numpy().flatten()
 
-            # Create arrays aligned with original df
-            parent_predictions = [""] * len(df)
-            parent_confidence = np.zeros(len(df))
+            # Create dictionaries mapping original index to predictions
+            # This handles non-contiguous DataFrame indices
+            parent_predictions = {}
+            parent_confidence = {}
 
             for i, orig_idx in enumerate(level_df.index):
                 pred_label = self.level_idx_to_label[level_name][pred_indices[i]]
                 parent_predictions[orig_idx] = pred_label
                 parent_confidence[orig_idx] = pred_confidence[i]
-
-            parent_predictions = parent_predictions
-            parent_confidence = parent_confidence
 
         self._is_trained = True
 
@@ -567,11 +567,14 @@ class HierarchicalCOICOPClassifier:
                 continue
 
             classifier = self.level_classifiers[level_name]
-            use_parent = (
-                level_idx > 0
-                and self.config.use_parent_features
-                and parent_predictions is not None
-            )
+
+            # Check if this classifier was trained with parent features
+            has_parent_features = level_name in self.parent_code_to_idx
+
+            # Use parent features only if:
+            # 1. Classifier was trained with parent features
+            # 2. We have parent predictions from previous level
+            use_parent = has_parent_features and parent_predictions is not None
 
             # Prepare input
             if use_parent:
@@ -581,6 +584,11 @@ class HierarchicalCOICOPClassifier:
                     parent_code_to_idx.get(code, 0) for code in parent_predictions
                 ])
                 conf_buckets = self._discretize_confidence(parent_confidence)
+            elif has_parent_features:
+                # Classifier expects parent features but we don't have them
+                # Use default values (index 0, high confidence bucket)
+                parent_code_indices = np.zeros(n, dtype=int)
+                conf_buckets = self._discretize_confidence(np.ones(n) * 0.5)
             else:
                 parent_code_indices = None
                 conf_buckets = None
