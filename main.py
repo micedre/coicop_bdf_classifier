@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 
 logging.basicConfig(
@@ -107,6 +108,19 @@ def cmd_predict_hierarchical(args: argparse.Namespace) -> None:
                 print("Level breakdown:")
                 for level_name, level_data in pred["levels"].items():
                     print(f"  {level_name}: {level_data['code']} (conf: {level_data['confidence']:.2f})")
+
+
+def cmd_serve(args: argparse.Namespace) -> None:
+    """Start the FastAPI prediction server."""
+    import uvicorn
+
+    os.environ["COICOP_MODEL_PATH"] = args.model
+    uvicorn.run(
+        "src.api:app",
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+    )
 
 
 def cmd_evaluate(args: argparse.Namespace) -> None:
@@ -469,6 +483,35 @@ def main() -> int:
         help="Show detailed classification report",
     )
     eval_parser.set_defaults(func=cmd_evaluate)
+
+    # Serve command
+    serve_parser = subparsers.add_parser(
+        "serve", help="Start the FastAPI prediction API server"
+    )
+    serve_parser.add_argument(
+        "--model",
+        type=str,
+        default="checkpoints/hierarchical/hierarchical_model",
+        help="Path to saved hierarchical model",
+    )
+    serve_parser.add_argument(
+        "--host",
+        type=str,
+        default="0.0.0.0",
+        help="Host to bind the server to",
+    )
+    serve_parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port to bind the server to",
+    )
+    serve_parser.add_argument(
+        "--reload",
+        action="store_true",
+        help="Enable auto-reload for development",
+    )
+    serve_parser.set_defaults(func=cmd_serve)
 
     args = parser.parse_args()
 
