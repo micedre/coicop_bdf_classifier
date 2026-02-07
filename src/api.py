@@ -7,11 +7,15 @@ import logging
 import os
 import traceback
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+
+_STATIC_DIR = Path(__file__).parent / "static"
 
 from .predict import HierarchicalCOICOPPredictor
 
@@ -199,6 +203,18 @@ async def model_info(request: Request):
         level_class_counts=level_class_counts,
     )
 
+
+# ---------------------------------------------------------------------------
+# Serve frontend
+# ---------------------------------------------------------------------------
+
+
+@app.get("/", include_in_schema=False)
+async def root():
+    return FileResponse(_STATIC_DIR / "index.html")
+
+
+app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
 # ---------------------------------------------------------------------------
 # Standalone entry point

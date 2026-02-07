@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Classificateur COICOP</title>
+  <style>
+    :root {
+      --green: #28a745;
+      --orange: #fd7e14;
+      --red: #dc3545;
+      --bg: #f8f9fa;
+      --card-bg: #ffffff;
+      --border: #dee2e6;
+      --text: #212529;
+      --text-muted: #6c757d;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 2rem 1rem;
+    }
+
+    .container {
+      max-width: 700px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      font-size: 1.8rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .subtitle {
+      color: var(--text-muted);
+      margin-bottom: 1.5rem;
+    }
+
+    /* Health badge */
+    .health {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.85rem;
+      padding: 0.2rem 0.6rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      margin-bottom: 1.5rem;
+    }
+    .health-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--text-muted);
+    }
+    .health-dot.ok { background: var(--green); }
+    .health-dot.err { background: var(--red); }
+
+    /* API URL */
+    .api-url-group {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+      font-size: 0.85rem;
+    }
+    .api-url-group label { color: var(--text-muted); white-space: nowrap; }
+    .api-url-group input {
+      flex: 1;
+      padding: 0.3rem 0.5rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-size: 0.85rem;
+    }
+
+    /* Input area */
+    .input-group {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .input-group input {
+      flex: 1;
+      padding: 0.6rem 0.8rem;
+      font-size: 1rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    .input-group input:focus { outline: 2px solid #0d6efd; outline-offset: -1px; }
+    .input-group button {
+      padding: 0.6rem 1.2rem;
+      font-size: 1rem;
+      background: #0d6efd;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .input-group button:hover { background: #0b5ed7; }
+    .input-group button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    /* Cards */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.2rem;
+      margin-bottom: 1rem;
+    }
+
+    .result-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 0.8rem;
+    }
+    .result-code {
+      font-size: 1.4rem;
+      font-weight: 700;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+    .result-level {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+
+    /* Confidence bar */
+    .confidence-row {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      margin-bottom: 0.3rem;
+    }
+    .confidence-label {
+      width: 110px;
+      text-align: right;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+    .confidence-bar-bg {
+      flex: 1;
+      height: 18px;
+      background: #e9ecef;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .confidence-bar {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.3s ease;
+    }
+    .confidence-value {
+      width: 50px;
+      text-align: right;
+      font-size: 0.85rem;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    /* Level table */
+    .levels-title {
+      font-weight: 600;
+      margin-bottom: 0.6rem;
+      font-size: 0.95rem;
+    }
+
+    .error-msg {
+      color: var(--red);
+      font-size: 0.9rem;
+      margin-bottom: 1rem;
+    }
+
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Classificateur COICOP</h1>
+    <p class="subtitle">Classification hierarchique de produits</p>
+
+    <div class="api-url-group">
+      <label for="apiUrl">API URL :</label>
+      <input type="text" id="apiUrl" value="" placeholder="(meme origine)">
+    </div>
+
+    <div class="health" id="healthBadge">
+      <span class="health-dot" id="healthDot"></span>
+      <span id="healthText">Verification...</span>
+    </div>
+
+    <div class="input-group">
+      <input type="text" id="productInput" placeholder="Entrez un libelle produit, ex: pain complet bio" autofocus>
+      <button id="classifyBtn">Classifier</button>
+    </div>
+
+    <div id="errorMsg" class="error-msg hidden"></div>
+
+    <div id="resultCard" class="card hidden">
+      <div class="result-header">
+        <span class="result-code" id="resultCode"></span>
+        <span class="result-level" id="resultLevel"></span>
+      </div>
+      <div class="confidence-row">
+        <span class="confidence-label">Confiance</span>
+        <div class="confidence-bar-bg">
+          <div class="confidence-bar" id="resultBar"></div>
+        </div>
+        <span class="confidence-value" id="resultConf"></span>
+      </div>
+    </div>
+
+    <div id="levelsCard" class="card hidden">
+      <div class="levels-title">Detail par niveau</div>
+      <div id="levelsBody"></div>
+    </div>
+  </div>
+
+  <script>
+    var apiUrlInput = document.getElementById("apiUrl");
+    var healthDot = document.getElementById("healthDot");
+    var healthText = document.getElementById("healthText");
+    var productInput = document.getElementById("productInput");
+    var classifyBtn = document.getElementById("classifyBtn");
+    var errorMsg = document.getElementById("errorMsg");
+    var resultCard = document.getElementById("resultCard");
+    var resultCode = document.getElementById("resultCode");
+    var resultLevel = document.getElementById("resultLevel");
+    var resultBar = document.getElementById("resultBar");
+    var resultConf = document.getElementById("resultConf");
+    var levelsCard = document.getElementById("levelsCard");
+    var levelsBody = document.getElementById("levelsBody");
+
+    function getBase() {
+      return apiUrlInput.value.replace(/\/+$/, "");
+    }
+
+    function confidenceColor(v) {
+      if (v > 0.7) return "var(--green)";
+      if (v > 0.4) return "var(--orange)";
+      return "var(--red)";
+    }
+
+    function pct(v) {
+      return (v * 100).toFixed(1) + "%";
+    }
+
+    function showError(msg) {
+      errorMsg.textContent = msg;
+      errorMsg.classList.remove("hidden");
+    }
+
+    function hideError() {
+      errorMsg.classList.add("hidden");
+    }
+
+    /* Health check */
+    function checkHealth() {
+      healthDot.className = "health-dot";
+      healthText.textContent = "Verification...";
+      fetch(getBase() + "/health")
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.status === "ok") {
+            healthDot.className = "health-dot ok";
+            healthText.textContent = "Connecte";
+          } else {
+            healthDot.className = "health-dot err";
+            healthText.textContent = "Modele non charge";
+          }
+        })
+        .catch(function() {
+          healthDot.className = "health-dot err";
+          healthText.textContent = "Injoignable";
+        });
+    }
+
+    /* Classify */
+    function classify() {
+      var text = productInput.value.trim();
+      if (!text) return;
+
+      hideError();
+      resultCard.classList.add("hidden");
+      levelsCard.classList.add("hidden");
+      classifyBtn.disabled = true;
+      classifyBtn.textContent = "...";
+
+      fetch(getBase() + "/predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text, return_all_levels: true })
+      })
+        .then(function(r) {
+          if (!r.ok) throw new Error("Erreur HTTP " + r.status);
+          return r.json();
+        })
+        .then(function(data) {
+          var p = data.prediction;
+
+          /* Main result */
+          resultCode.textContent = p.code;
+          resultLevel.textContent = "Niveau final : " + p.final_level;
+          resultBar.style.width = pct(p.confidence);
+          resultBar.style.background = confidenceColor(p.confidence);
+          resultConf.textContent = pct(p.confidence);
+          resultConf.style.color = confidenceColor(p.confidence);
+          resultCard.classList.remove("hidden");
+
+          /* Level breakdown */
+          if (p.levels) {
+            levelsBody.innerHTML = "";
+            var keys = Object.keys(p.levels);
+            keys.sort();
+            keys.forEach(function(lvl) {
+              var lp = p.levels[lvl];
+              var row = document.createElement("div");
+              row.className = "confidence-row";
+              row.innerHTML =
+                '<span class="confidence-label">' + lvl + " : " + lp.code + '</span>' +
+                '<div class="confidence-bar-bg"><div class="confidence-bar" style="width:' +
+                pct(lp.confidence) + ";background:" + confidenceColor(lp.confidence) +
+                '"></div></div>' +
+                '<span class="confidence-value" style="color:' +
+                confidenceColor(lp.confidence) + '">' + pct(lp.confidence) + "</span>";
+              levelsBody.appendChild(row);
+            });
+            levelsCard.classList.remove("hidden");
+          }
+        })
+        .catch(function(err) {
+          showError(err.message || "Erreur inconnue");
+        })
+        .finally(function() {
+          classifyBtn.disabled = false;
+          classifyBtn.textContent = "Classifier";
+        });
+    }
+
+    classifyBtn.addEventListener("click", classify);
+    productInput.addEventListener("keydown", function(e) {
+      if (e.key === "Enter") classify();
+    });
+    apiUrlInput.addEventListener("change", checkHealth);
+
+    /* Initial health check */
+    checkHealth();
+  </script>
+</body>
+</html>
