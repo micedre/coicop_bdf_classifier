@@ -1,0 +1,11 @@
+project:
+  type: website
+  output-dir: _site
+
+website:
+  title: "COICOP Classifier"
+
+format:
+  html:
+    filters:
+      - ojs-offline
