@@ -35,17 +35,25 @@ DEFAULT_MODEL_PATH = "checkpoints/hierarchical/hierarchical_model"
 class PredictRequest(BaseModel):
     text: str
     return_all_levels: bool = True
+    top_k: int = Field(default=1, ge=1, le=10)
 
 
 class PredictBatchRequest(BaseModel):
     texts: list[str] = Field(..., max_length=1024)
     return_all_levels: bool = True
     batch_size: int = 64
+    top_k: int = Field(default=1, ge=1, le=10)
+
+
+class LevelAlternative(BaseModel):
+    code: str
+    confidence: float
 
 
 class LevelPrediction(BaseModel):
     code: str
     confidence: float
+    alternatives: list[LevelAlternative] | None = None
 
 
 class PredictionResult(BaseModel):
@@ -125,10 +133,12 @@ def _get_predictor(request: Request) -> HierarchicalCOICOPPredictor:
 def _to_prediction_result(pred: dict) -> PredictionResult:
     levels = None
     if "levels" in pred:
-        levels = {
-            name: LevelPrediction(code=data["code"], confidence=data["confidence"])
-            for name, data in pred["levels"].items()
-        }
+        levels = {}
+        for name, data in pred["levels"].items():
+            alts = None
+            if "alternatives" in data:
+                alts = [LevelAlternative(code=a["code"], confidence=a["confidence"]) for a in data["alternatives"]]
+            levels[name] = LevelPrediction(code=data["code"], confidence=data["confidence"], alternatives=alts)
     return PredictionResult(
         text=pred["text"],
         code=pred["code"],
@@ -172,7 +182,7 @@ async def health(request: Request):
 async def predict(body: PredictRequest, request: Request):
     predictor = _get_predictor(request)
     results = predictor.predict(
-        [body.text], return_all_levels=body.return_all_levels
+        [body.text], return_all_levels=body.return_all_levels, top_k=body.top_k
     )
     return PredictResponse(prediction=_to_prediction_result(results[0]))
 
@@ -184,6 +194,7 @@ async def predict_batch(body: PredictBatchRequest, request: Request):
         body.texts,
         batch_size=body.batch_size,
         return_all_levels=body.return_all_levels,
+        top_k=body.top_k,
     )
     predictions = [_to_prediction_result(r) for r in results]
     return PredictBatchResponse(predictions=predictions, count=len(predictions))

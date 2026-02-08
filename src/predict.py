@@ -179,17 +179,19 @@ class HierarchicalCOICOPPredictor:
         self,
         texts: list[str],
         return_all_levels: bool = True,
+        top_k: int = 1,
     ) -> list[dict]:
         """Predict COICOP codes for input texts.
 
         Args:
             texts: List of product descriptions
             return_all_levels: Whether to include predictions at all levels
+            top_k: Number of top predictions per level
 
         Returns:
             List of prediction dictionaries
         """
-        result = self.classifier.predict(texts, return_all_levels=return_all_levels)
+        result = self.classifier.predict(texts, return_all_levels=return_all_levels, top_k=top_k)
 
         predictions = []
         for i, text in enumerate(texts):
@@ -204,10 +206,21 @@ class HierarchicalCOICOPPredictor:
             if return_all_levels and "all_levels" in result:
                 pred["levels"] = {}
                 for level_name, level_data in result["all_levels"].items():
-                    pred["levels"][level_name] = {
-                        "code": level_data["predictions"][i],
-                        "confidence": level_data["confidence"][i],
-                    }
+                    if top_k > 1:
+                        # level_data["predictions"][i] is list[str], confidence is list[float]
+                        pred["levels"][level_name] = {
+                            "code": level_data["predictions"][i][0],
+                            "confidence": level_data["confidence"][i][0],
+                            "alternatives": [
+                                {"code": level_data["predictions"][i][k], "confidence": level_data["confidence"][i][k]}
+                                for k in range(1, top_k)
+                            ],
+                        }
+                    else:
+                        pred["levels"][level_name] = {
+                            "code": level_data["predictions"][i],
+                            "confidence": level_data["confidence"][i],
+                        }
 
             predictions.append(pred)
 
@@ -218,6 +231,7 @@ class HierarchicalCOICOPPredictor:
         texts: list[str],
         batch_size: int = 64,
         return_all_levels: bool = True,
+        top_k: int = 1,
     ) -> list[dict]:
         """Predict in batches for large datasets.
 
@@ -225,6 +239,7 @@ class HierarchicalCOICOPPredictor:
             texts: List of product descriptions
             batch_size: Number of texts per batch
             return_all_levels: Whether to include all hierarchy levels
+            top_k: Number of top predictions per level
 
         Returns:
             List of prediction dictionaries
@@ -233,7 +248,7 @@ class HierarchicalCOICOPPredictor:
 
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
-            predictions = self.predict(batch, return_all_levels=return_all_levels)
+            predictions = self.predict(batch, return_all_levels=return_all_levels, top_k=top_k)
             all_predictions.extend(predictions)
 
             if (i + batch_size) % (batch_size * 10) == 0:

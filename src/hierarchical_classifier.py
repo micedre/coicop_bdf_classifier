@@ -534,6 +534,7 @@ class HierarchicalCOICOPClassifier:
         self,
         texts: list[str],
         return_all_levels: bool = True,
+        top_k: int = 1,
     ) -> dict:
         """Cascade predictions through all 5 levels.
 
@@ -596,29 +597,58 @@ class HierarchicalCOICOPClassifier:
             X = self._prepare_input_with_features(texts, parent_code_indices, conf_buckets)
 
             # Predict
-            result = classifier.predict(X, top_k=1)
-            pred_indices = result["prediction"].numpy().flatten()
-            pred_confidence = result["confidence"].numpy().flatten()
-
-            # Convert to labels
+            result = classifier.predict(X, top_k=top_k)
             idx_to_label = self.level_idx_to_label[level_name]
-            predictions = [idx_to_label[idx] for idx in pred_indices]
 
-            # Store level results
-            all_levels[level_name] = {
-                "predictions": predictions,
-                "confidence": pred_confidence.tolist(),
-            }
+            if top_k > 1:
+                # result["prediction"] shape (n, top_k), result["confidence"] shape (n, top_k)
+                pred_indices_2d = result["prediction"].numpy()
+                pred_confidence_2d = result["confidence"].numpy()
 
-            # Update final predictions
-            for i in range(n):
-                final_code[i] = predictions[i]
-                final_confidence[i] = pred_confidence[i]
-                final_level[i] = level_name
+                # Top-1 for cascade
+                top1_indices = pred_indices_2d[:, 0].flatten()
+                top1_confidence = pred_confidence_2d[:, 0].flatten()
+                predictions = [idx_to_label[idx] for idx in top1_indices]
 
-            # Prepare for next level
-            parent_predictions = predictions
-            parent_confidence = pred_confidence
+                # All top-K labels
+                top_k_labels = [
+                    [idx_to_label[pred_indices_2d[i, k]] for k in range(top_k)]
+                    for i in range(n)
+                ]
+                top_k_confs = pred_confidence_2d.tolist()
+
+                all_levels[level_name] = {
+                    "predictions": top_k_labels,
+                    "confidence": top_k_confs,
+                }
+
+                # Update final predictions (top-1)
+                for i in range(n):
+                    final_code[i] = predictions[i]
+                    final_confidence[i] = top1_confidence[i]
+                    final_level[i] = level_name
+
+                # Prepare for next level (always top-1)
+                parent_predictions = predictions
+                parent_confidence = top1_confidence
+            else:
+                pred_indices = result["prediction"].numpy().flatten()
+                pred_confidence = result["confidence"].numpy().flatten()
+
+                predictions = [idx_to_label[idx] for idx in pred_indices]
+
+                all_levels[level_name] = {
+                    "predictions": predictions,
+                    "confidence": pred_confidence.tolist(),
+                }
+
+                for i in range(n):
+                    final_code[i] = predictions[i]
+                    final_confidence[i] = pred_confidence[i]
+                    final_level[i] = level_name
+
+                parent_predictions = predictions
+                parent_confidence = pred_confidence
 
         result = {
             "final_code": final_code,

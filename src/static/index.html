@@ -176,6 +176,23 @@
       margin-bottom: 1rem;
     }
 
+    .level-below-threshold {
+      opacity: 0.4;
+      text-decoration: line-through;
+    }
+
+    .alternative-row {
+      font-size: 0.8rem;
+      padding-left: 1.5rem;
+      opacity: 0.7;
+    }
+    .alternative-row .confidence-label {
+      font-size: 0.8rem;
+    }
+    .alternative-row .confidence-value {
+      font-size: 0.8rem;
+    }
+
     .hidden { display: none; }
   </style>
 </head>
@@ -187,6 +204,16 @@
     <div class="api-url-group">
       <label for="apiUrl">API URL :</label>
       <input type="text" id="apiUrl" value="" placeholder="(meme origine)">
+    </div>
+
+    <div class="api-url-group">
+      <label for="confidenceThreshold">Seuil de confiance :</label>
+      <input type="number" id="confidenceThreshold" value="0" min="0" max="100" step="5" style="width:70px;"> %
+    </div>
+
+    <div class="api-url-group">
+      <label for="topKInput">Predictions par niveau :</label>
+      <input type="number" id="topKInput" value="1" min="1" max="10" step="1" style="width:70px;">
     </div>
 
     <div class="health" id="healthBadge">
@@ -929,6 +956,8 @@
     function coicopLabel(code) { return COICOP_LABELS[code] || ""; }
 
     var apiUrlInput = document.getElementById("apiUrl");
+    var confidenceThreshold = document.getElementById("confidenceThreshold");
+    var topKInput = document.getElementById("topKInput");
     var healthDot = document.getElementById("healthDot");
     var healthText = document.getElementById("healthText");
     var productInput = document.getElementById("productInput");
@@ -1000,7 +1029,7 @@
       fetch(getBase() + "/predict", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text, return_all_levels: true })
+        body: JSON.stringify({ text: text, return_all_levels: true, top_k: parseInt(topKInput.value) || 1 })
       })
         .then(function(r) {
           if (!r.ok) throw new Error("Erreur HTTP " + r.status);
@@ -1008,15 +1037,51 @@
         })
         .then(function(data) {
           var p = data.prediction;
+          var threshold = parseFloat(confidenceThreshold.value) / 100 || 0;
+
+          /* Compute cumulative confidence and apply threshold */
+          var cumulativeConf = 1;
+          var effectiveCode = "";
+          var effectiveLevel = "";
+          var effectiveCumConf = 1;
+
+          if (p.levels) {
+            var keys = Object.keys(p.levels);
+            keys.sort();
+            keys.forEach(function(lvl) {
+              var lp = p.levels[lvl];
+              cumulativeConf *= lp.confidence;
+              if (effectiveCode === "" || cumulativeConf >= threshold) {
+                effectiveCode = lp.code;
+                effectiveLevel = lvl;
+                effectiveCumConf = cumulativeConf;
+              }
+            });
+          } else {
+            cumulativeConf = p.confidence;
+            effectiveCode = p.code;
+            effectiveLevel = p.final_level;
+            effectiveCumConf = p.confidence;
+          }
 
           /* Main result */
-          resultCode.textContent = p.code;
-          document.getElementById("resultLabel").textContent = coicopLabel(p.code);
-          resultLevel.textContent = "Niveau final : " + p.final_level;
-          resultBar.style.width = pct(p.confidence);
-          resultBar.style.background = confidenceColor(p.confidence);
-          resultConf.textContent = pct(p.confidence);
-          resultConf.style.color = confidenceColor(p.confidence);
+          if (threshold > 0 && effectiveCode !== p.code) {
+            resultCode.textContent = effectiveCode;
+            document.getElementById("resultLabel").textContent = coicopLabel(effectiveCode);
+            resultLevel.textContent = "Niveau final : " + effectiveLevel + " (seuil atteint)";
+            resultBar.style.width = pct(effectiveCumConf);
+            resultBar.style.background = confidenceColor(effectiveCumConf);
+            resultConf.textContent = pct(effectiveCumConf);
+            resultConf.style.color = confidenceColor(effectiveCumConf);
+          } else {
+            resultCode.textContent = p.code;
+            document.getElementById("resultLabel").textContent = coicopLabel(p.code);
+            resultLevel.textContent = "Niveau final : " + p.final_level;
+            resultBar.style.width = pct(cumulativeConf);
+            resultBar.style.background = confidenceColor(cumulativeConf);
+            resultConf.textContent = pct(cumulativeConf);
+            resultConf.style.color = confidenceColor(cumulativeConf);
+          }
           resultCard.classList.remove("hidden");
 
           /* Level breakdown */
@@ -1024,18 +1089,37 @@
             levelsBody.innerHTML = "";
             var keys = Object.keys(p.levels);
             keys.sort();
+            var cumConf = 1;
             keys.forEach(function(lvl) {
               var lp = p.levels[lvl];
+              cumConf *= lp.confidence;
+              var belowThreshold = threshold > 0 && cumConf < threshold;
               var row = document.createElement("div");
-              row.className = "confidence-row";
+              row.className = "confidence-row" + (belowThreshold ? " level-below-threshold" : "");
               row.innerHTML =
                 '<span class="confidence-label">' + lvl + " : " + lp.code + (coicopLabel(lp.code) ? " \u2014 " + coicopLabel(lp.code) : "") + '</span>' +
                 '<div class="confidence-bar-bg"><div class="confidence-bar" style="width:' +
                 pct(lp.confidence) + ";background:" + confidenceColor(lp.confidence) +
                 '"></div></div>' +
                 '<span class="confidence-value" style="color:' +
-                confidenceColor(lp.confidence) + '">' + pct(lp.confidence) + "</span>";
+                confidenceColor(lp.confidence) + '">' + pct(lp.confidence) + " (cum: " + pct(cumConf) + ")" + "</span>";
               levelsBody.appendChild(row);
+
+              /* Show alternatives if top_k > 1 */
+              if (lp.alternatives && lp.alternatives.length > 0) {
+                lp.alternatives.forEach(function(alt, idx) {
+                  var altRow = document.createElement("div");
+                  altRow.className = "confidence-row alternative-row" + (belowThreshold ? " level-below-threshold" : "");
+                  altRow.innerHTML =
+                    '<span class="confidence-label">' + (idx + 2) + ". " + alt.code + (coicopLabel(alt.code) ? " \u2014 " + coicopLabel(alt.code) : "") + '</span>' +
+                    '<div class="confidence-bar-bg"><div class="confidence-bar" style="width:' +
+                    pct(alt.confidence) + ";background:" + confidenceColor(alt.confidence) +
+                    '"></div></div>' +
+                    '<span class="confidence-value" style="color:' +
+                    confidenceColor(alt.confidence) + '">' + pct(alt.confidence) + "</span>";
+                  levelsBody.appendChild(altRow);
+                });
+              }
             });
             levelsCard.classList.remove("hidden");
           }
