@@ -261,6 +261,7 @@ class HierarchicalCOICOPPredictor:
         df: pd.DataFrame,
         text_column: str = "product",
         batch_size: int = 64,
+        top_k: int = 1,
     ) -> pd.DataFrame:
         """Predict codes for a DataFrame.
 
@@ -268,12 +269,13 @@ class HierarchicalCOICOPPredictor:
             df: DataFrame with text column
             text_column: Name of the text column
             batch_size: Batch size for prediction
+            top_k: Number of top predictions per level
 
         Returns:
             DataFrame with predictions added
         """
         texts = df[text_column].tolist()
-        predictions = self.predict_batch(texts, batch_size=batch_size, return_all_levels=True)
+        predictions = self.predict_batch(texts, batch_size=batch_size, return_all_levels=True, top_k=top_k)
 
         # Add predictions to DataFrame
         result_df = df.copy()
@@ -291,6 +293,23 @@ class HierarchicalCOICOPPredictor:
                     p["levels"].get(level_name, {}).get("confidence", 0.0) for p in predictions
                 ]
 
+                # Add top-K alternative columns
+                if top_k > 1:
+                    for k in range(1, top_k):
+                        rank = k + 1
+                        result_df[f"predicted_{level_name}_top{rank}"] = [
+                            p["levels"].get(level_name, {}).get("alternatives", [{}] * k)[k - 1].get("code", "")
+                            if len(p["levels"].get(level_name, {}).get("alternatives", [])) >= k
+                            else ""
+                            for p in predictions
+                        ]
+                        result_df[f"confidence_{level_name}_top{rank}"] = [
+                            p["levels"].get(level_name, {}).get("alternatives", [{}] * k)[k - 1].get("confidence", 0.0)
+                            if len(p["levels"].get(level_name, {}).get("alternatives", [])) >= k
+                            else 0.0
+                            for p in predictions
+                        ]
+
         return result_df
 
     def predict_file(
@@ -299,6 +318,7 @@ class HierarchicalCOICOPPredictor:
         output_path: str | Path,
         text_column: str = "product",
         batch_size: int = 64,
+        top_k: int = 1,
     ) -> None:
         """Predict codes for a file and save results.
 
@@ -307,6 +327,7 @@ class HierarchicalCOICOPPredictor:
             output_path: Path to save output file
             text_column: Name of the text column
             batch_size: Batch size for prediction
+            top_k: Number of top predictions per level
         """
         input_path = Path(input_path)
         output_path = Path(output_path)
@@ -322,7 +343,7 @@ class HierarchicalCOICOPPredictor:
         logger.info(f"Loaded {len(df)} samples from {input_path}")
 
         # Predict
-        result_df = self.predict_dataframe(df, text_column=text_column, batch_size=batch_size)
+        result_df = self.predict_dataframe(df, text_column=text_column, batch_size=batch_size, top_k=top_k)
 
         # Save output
         output_path.parent.mkdir(parents=True, exist_ok=True)

@@ -91,6 +91,7 @@ def cmd_predict_hierarchical(args: argparse.Namespace) -> None:
             output_path=args.output,
             text_column=args.text_column,
             batch_size=args.batch_size,
+            top_k=args.top_k,
         )
     else:
         # Text-based prediction
@@ -99,7 +100,7 @@ def cmd_predict_hierarchical(args: argparse.Namespace) -> None:
         else:
             texts = args.texts
 
-        predictions = predictor.predict(texts)
+        predictions = predictor.predict(texts, top_k=args.top_k)
         for pred in predictions:
             # Format hierarchical output nicely
             print(f"\nText: {pred['text']}")
@@ -108,6 +109,9 @@ def cmd_predict_hierarchical(args: argparse.Namespace) -> None:
                 print("Level breakdown:")
                 for level_name, level_data in pred["levels"].items():
                     print(f"  {level_name}: {level_data['code']} (conf: {level_data['confidence']:.2f})")
+                    if "alternatives" in level_data:
+                        for i, alt in enumerate(level_data["alternatives"], start=2):
+                            print(f"    top {i}: {alt['code']} (conf: {alt['confidence']:.2f})")
 
 
 def cmd_serve(args: argparse.Namespace) -> None:
@@ -432,6 +436,12 @@ def main() -> int:
         type=int,
         default=64,
         help="Batch size for prediction",
+    )
+    predict_hier_parser.add_argument(
+        "--top-k",
+        type=int,
+        default=1,
+        help="Number of top predictions per level (default: 1)",
     )
     predict_hier_parser.add_argument(
         "texts",
