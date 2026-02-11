@@ -301,6 +301,7 @@ class HierarchicalCOICOPClassifier:
         text_column: str = "text",
         code_column: str = "code",
         save_dir: str | None = None,
+        mlflow_run_info: dict | None = None,
     ) -> dict:
         """Train all level classifiers sequentially.
 
@@ -470,6 +471,15 @@ class HierarchicalCOICOPClassifier:
 
             logger.info(f"  Train: {len(train_idx)}, Val: {len(val_idx)}")
 
+            # Build per-level trainer_params with MLflow logger if available
+            level_trainer_params = None
+            if mlflow_run_info:
+                from .mlflow_utils import make_trainer_params
+
+                level_trainer_params = make_trainer_params(
+                    **mlflow_run_info, prefix=level_name
+                )
+
             # Training config
             save_path = None
             if save_dir:
@@ -481,6 +491,7 @@ class HierarchicalCOICOPClassifier:
                 lr=self.config.lr,
                 patience_early_stopping=self.config.patience,
                 save_path=save_path or f"hierarchical_{level_name}",
+                **({"trainer_params": level_trainer_params} if level_trainer_params else {}),
             )
 
             # Train

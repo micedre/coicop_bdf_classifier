@@ -89,6 +89,7 @@ class COICOPClassifier:
         num_epochs: int = DEFAULT_NUM_EPOCHS,
         patience: int = DEFAULT_PATIENCE,
         save_path: str | None = None,
+        trainer_params: dict | None = None,
     ) -> dict:
         """Train the classifier.
 
@@ -117,6 +118,7 @@ class COICOPClassifier:
             lr=lr,
             patience_early_stopping=patience,
             save_path=save_path or "coicop_classifier",
+            **({"trainer_params": trainer_params} if trainer_params else {}),
         )
 
         # Train

@@ -19,6 +19,78 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _evaluate_on_annotations(
+    classifier,
+    model_path: str | Path,
+    classifier_type: str,
+    eval_data_path: str,
+    eval_text_column: str,
+    eval_top_k: int,
+) -> dict[str, float]:
+    """Predict on eval data and return top-k accuracy metrics dict.
+
+    Args:
+        classifier: Trained classifier instance (saved already).
+        model_path: Path to the saved model directory.
+        classifier_type: "hierarchical" or "cascade".
+        eval_data_path: Path to evaluation parquet/csv file.
+        eval_text_column: Name of text column in eval data.
+        eval_top_k: Maximum K for top-k accuracy.
+
+    Returns:
+        Dict of {f"eval_level{N}_top-{K}": accuracy, ...}.
+    """
+    import pandas as pd
+
+    from .predict import HierarchicalCOICOPPredictor
+    from topk_accuracy import compute_topk_accuracy, detect_levels, detect_max_k, ensure_true_labels
+
+    logger.info(f"Running evaluation on {eval_data_path}...")
+
+    # Load eval data
+    eval_path = Path(eval_data_path)
+    if eval_path.suffix == ".parquet":
+        eval_df = pd.read_parquet(eval_path)
+    else:
+        eval_df = pd.read_csv(eval_path)
+
+    logger.info(f"Loaded {len(eval_df)} evaluation samples")
+
+    if classifier_type == "hierarchical":
+        predictor = HierarchicalCOICOPPredictor(model_path)
+        result_df = predictor.predict_dataframe(
+            eval_df,
+            text_column=eval_text_column,
+            top_k=eval_top_k,
+        )
+    else:
+        from .predict import COICOPPredictor
+        predictor = COICOPPredictor(model_path)
+        result_df = predictor.predict_dataframe(
+            eval_df,
+            text_column=eval_text_column,
+        )
+
+    # Ensure true label columns exist
+    result_df = ensure_true_labels(result_df)
+
+    # Compute top-k accuracy per level
+    levels = detect_levels(list(result_df.columns))
+    ks = list(range(1, eval_top_k + 1))
+    eval_metrics: dict[str, float] = {}
+
+    for level in levels:
+        max_k = detect_max_k(list(result_df.columns), level)
+        row = compute_topk_accuracy(result_df, level, ks, max_k)
+        for k in ks:
+            key = f"top-{k}"
+            if key in row and not (isinstance(row[key], float) and row[key] != row[key]):
+                eval_metrics[f"eval_level{level}_top-{k}"] = row[key]
+
+    logger.info(f"Evaluation metrics: {eval_metrics}")
+    return eval_metrics
+
+
 def train_cascade_classifier(
     annotations_path: str,
     output_dir: str,
@@ -31,6 +103,9 @@ def train_cascade_classifier(
     patience: int = 5,
     min_samples: int = 50,
     mlflow_experiment: str | None = None,
+    eval_data_path: str | None = None,
+    eval_top_k: int = 5,
+    eval_text_column: str = "text",
 ) -> CascadeCOICOPClassifier:
     """Train the cascade COICOP classifier.
 
@@ -46,6 +121,9 @@ def train_cascade_classifier(
         patience: Early stopping patience
         min_samples: Minimum samples for sub-classifiers
         mlflow_experiment: MLflow experiment name (optional)
+        eval_data_path: Path to evaluation data for post-training metrics
+        eval_top_k: Maximum K for top-k accuracy evaluation
+        eval_text_column: Text column name in evaluation data
 
     Returns:
         Trained CascadeCOICOPClassifier
@@ -65,6 +143,7 @@ def train_cascade_classifier(
     logger.info(f"Level 1 categories: {unique_level1}")
 
     # Initialize MLflow if experiment name provided
+    trainer_params = None
     if mlflow_experiment:
         mlflow.set_experiment(mlflow_experiment)
         mlflow.start_run()
@@ -81,6 +160,15 @@ def train_cascade_classifier(
             "unique_codes": unique_codes,
             "unique_level1": unique_level1,
         })
+
+        from .mlflow_utils import make_trainer_params
+
+        run_id = mlflow.active_run().info.run_id
+        trainer_params = make_trainer_params(
+            experiment_name=mlflow_experiment,
+            run_id=run_id,
+            tracking_uri=mlflow.get_tracking_uri(),
+        )
 
     # Create cascade classifier
     classifier = CascadeCOICOPClassifier(
@@ -101,6 +189,7 @@ def train_cascade_classifier(
         num_epochs=num_epochs,
         patience=patience,
         save_dir=str(output_path / "checkpoints"),
+        trainer_params=trainer_params,
     )
 
     # Log metrics to MLflow
@@ -119,11 +208,24 @@ def train_cascade_classifier(
             })
 
     # Save the complete cascade classifier
-    classifier.save(output_path / "model")
-    logger.info(f"Model saved to {output_path / 'model'}")
+    model_save_path = output_path / "model"
+    classifier.save(model_save_path)
+    logger.info(f"Model saved to {model_save_path}")
 
     if mlflow_experiment:
-        mlflow.log_artifact(str(output_path / "model"))
+        # Post-training evaluation
+        if eval_data_path:
+            eval_metrics = _evaluate_on_annotations(
+                classifier=classifier,
+                model_path=model_save_path,
+                classifier_type="cascade",
+                eval_data_path=eval_data_path,
+                eval_text_column=eval_text_column,
+                eval_top_k=eval_top_k,
+            )
+            mlflow.log_metrics(eval_metrics)
+
+        mlflow.log_artifacts(str(model_save_path), artifact_path="model")
         mlflow.end_run()
 
     return classifier
@@ -145,6 +247,9 @@ def train_hierarchical_classifier(
     use_parent_features: bool = True,
     teacher_forcing_ratio: float = 0.9,
     mlflow_experiment: str | None = None,
+    eval_data_path: str | None = None,
+    eval_top_k: int = 5,
+    eval_text_column: str = "text",
 ) -> HierarchicalCOICOPClassifier:
     """Train the hierarchical multi-level COICOP classifier.
 
@@ -168,6 +273,9 @@ def train_hierarchical_classifier(
         use_parent_features: Whether to use parent predictions as features
         teacher_forcing_ratio: Ratio of ground truth to use during training
         mlflow_experiment: MLflow experiment name (optional)
+        eval_data_path: Path to evaluation data for post-training metrics
+        eval_top_k: Maximum K for top-k accuracy evaluation
+        eval_text_column: Text column name in evaluation data
 
     Returns:
         Trained HierarchicalCOICOPClassifier
@@ -187,6 +295,7 @@ def train_hierarchical_classifier(
     logger.info(f"Level 1 categories: {unique_level1}")
 
     # Initialize MLflow if experiment name provided
+    mlflow_run_info = None
     if mlflow_experiment:
         mlflow.set_experiment(mlflow_experiment)
         mlflow.start_run()
@@ -208,6 +317,13 @@ def train_hierarchical_classifier(
             "unique_codes": unique_codes,
             "unique_level1": unique_level1,
         })
+
+        run_id = mlflow.active_run().info.run_id
+        mlflow_run_info = {
+            "experiment_name": mlflow_experiment,
+            "run_id": run_id,
+            "tracking_uri": mlflow.get_tracking_uri(),
+        }
 
     # Create config
     config = HierarchicalConfig(
@@ -234,6 +350,7 @@ def train_hierarchical_classifier(
         text_column="text",
         code_column="code",
         save_dir=str(output_path / "checkpoints"),
+        mlflow_run_info=mlflow_run_info,
     )
 
     # Log metrics to MLflow
@@ -251,7 +368,19 @@ def train_hierarchical_classifier(
     logger.info(f"Model saved to {model_path}")
 
     if mlflow_experiment:
-        mlflow.log_artifact(str(model_path))
+        # Post-training evaluation
+        if eval_data_path:
+            eval_metrics = _evaluate_on_annotations(
+                classifier=classifier,
+                model_path=model_path,
+                classifier_type="hierarchical",
+                eval_data_path=eval_data_path,
+                eval_text_column=eval_text_column,
+                eval_top_k=eval_top_k,
+            )
+            mlflow.log_metrics(eval_metrics)
+
+        mlflow.log_artifacts(str(model_path), artifact_path="model")
         mlflow.end_run()
 
     return classifier

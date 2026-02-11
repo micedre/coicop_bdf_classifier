@@ -101,6 +101,7 @@ class CascadeCOICOPClassifier:
         num_epochs: int = 20,
         patience: int = 5,
         save_dir: str | None = None,
+        trainer_params: dict | None = None,
     ) -> dict:
         """Train the cascade classifier.
 
@@ -159,6 +160,7 @@ class CascadeCOICOPClassifier:
             num_epochs=num_epochs,
             patience=patience,
             save_path=save_path,
+            trainer_params=trainer_params,
         )
 
         metrics["level1"] = {
@@ -238,6 +240,7 @@ class CascadeCOICOPClassifier:
                     num_epochs=num_epochs,
                     patience=patience,
                     save_path=sub_save_path,
+                    trainer_params=trainer_params,
                 )
 
                 self.sub_classifiers[level1_code] = sub_classifier

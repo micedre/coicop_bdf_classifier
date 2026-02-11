@@ -31,6 +31,9 @@ def cmd_train(args: argparse.Namespace) -> None:
         patience=args.patience,
         min_samples=args.min_samples,
         mlflow_experiment=args.mlflow_experiment,
+        eval_data_path=args.eval_data,
+        eval_top_k=args.eval_top_k,
+        eval_text_column=args.eval_text_column,
     )
 
 
@@ -54,6 +57,9 @@ def cmd_train_hierarchical(args: argparse.Namespace) -> None:
         use_parent_features=args.use_parent_features,
         teacher_forcing_ratio=args.teacher_forcing_ratio,
         mlflow_experiment=args.mlflow_experiment,
+        eval_data_path=args.eval_data,
+        eval_top_k=args.eval_top_k,
+        eval_text_column=args.eval_text_column,
     )
 
 
@@ -252,6 +258,24 @@ def main() -> int:
         default=None,
         help="MLflow experiment name (optional)",
     )
+    train_parser.add_argument(
+        "--eval-data",
+        type=str,
+        default=None,
+        help="Path to evaluation parquet for post-training top-k accuracy",
+    )
+    train_parser.add_argument(
+        "--eval-top-k",
+        type=int,
+        default=5,
+        help="Maximum K for top-k accuracy evaluation (default: 5)",
+    )
+    train_parser.add_argument(
+        "--eval-text-column",
+        type=str,
+        default="text",
+        help="Text column name in evaluation data (default: text)",
+    )
     train_parser.set_defaults(func=cmd_train)
 
     # Train-hierarchical command
@@ -354,6 +378,24 @@ def main() -> int:
         type=str,
         default=None,
         help="MLflow experiment name (optional)",
+    )
+    train_hier_parser.add_argument(
+        "--eval-data",
+        type=str,
+        default=None,
+        help="Path to evaluation parquet for post-training top-k accuracy",
+    )
+    train_hier_parser.add_argument(
+        "--eval-top-k",
+        type=int,
+        default=5,
+        help="Maximum K for top-k accuracy evaluation (default: 5)",
+    )
+    train_hier_parser.add_argument(
+        "--eval-text-column",
+        type=str,
+        default="text",
+        help="Text column name in evaluation data (default: text)",
     )
     train_hier_parser.set_defaults(func=cmd_train_hierarchical)
 
