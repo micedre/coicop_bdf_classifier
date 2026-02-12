@@ -180,6 +180,7 @@ class HierarchicalCOICOPPredictor:
         texts: list[str],
         return_all_levels: bool = True,
         top_k: int = 1,
+        confidence_threshold: float | None = None,
     ) -> list[dict]:
         """Predict COICOP codes for input texts.
 
@@ -187,11 +188,18 @@ class HierarchicalCOICOPPredictor:
             texts: List of product descriptions
             return_all_levels: Whether to include predictions at all levels
             top_k: Number of top predictions per level
+            confidence_threshold: Minimum confidence per level; stop at the
+                deepest level meeting this threshold.
 
         Returns:
             List of prediction dictionaries
         """
-        result = self.classifier.predict(texts, return_all_levels=return_all_levels, top_k=top_k)
+        result = self.classifier.predict(
+            texts,
+            return_all_levels=return_all_levels,
+            top_k=top_k,
+            confidence_threshold=confidence_threshold,
+        )
 
         predictions = []
         for i, text in enumerate(texts):
@@ -200,6 +208,7 @@ class HierarchicalCOICOPPredictor:
                 "code": result["final_code"][i],
                 "final_level": result["final_level"][i],
                 "confidence": result["final_confidence"][i],
+                "combined_confidence": result["combined_confidence"][i],
             }
 
             # Add level-by-level predictions if requested
@@ -232,6 +241,7 @@ class HierarchicalCOICOPPredictor:
         batch_size: int = 64,
         return_all_levels: bool = True,
         top_k: int = 1,
+        confidence_threshold: float | None = None,
     ) -> list[dict]:
         """Predict in batches for large datasets.
 
@@ -240,6 +250,8 @@ class HierarchicalCOICOPPredictor:
             batch_size: Number of texts per batch
             return_all_levels: Whether to include all hierarchy levels
             top_k: Number of top predictions per level
+            confidence_threshold: Minimum confidence per level; stop at the
+                deepest level meeting this threshold.
 
         Returns:
             List of prediction dictionaries
@@ -248,7 +260,12 @@ class HierarchicalCOICOPPredictor:
 
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
-            predictions = self.predict(batch, return_all_levels=return_all_levels, top_k=top_k)
+            predictions = self.predict(
+                batch,
+                return_all_levels=return_all_levels,
+                top_k=top_k,
+                confidence_threshold=confidence_threshold,
+            )
             all_predictions.extend(predictions)
 
             if (i + batch_size) % (batch_size * 10) == 0:
@@ -262,6 +279,7 @@ class HierarchicalCOICOPPredictor:
         text_column: str = "product",
         batch_size: int = 64,
         top_k: int = 1,
+        confidence_threshold: float | None = None,
     ) -> pd.DataFrame:
         """Predict codes for a DataFrame.
 
@@ -270,18 +288,27 @@ class HierarchicalCOICOPPredictor:
             text_column: Name of the text column
             batch_size: Batch size for prediction
             top_k: Number of top predictions per level
+            confidence_threshold: Minimum confidence per level; stop at the
+                deepest level meeting this threshold.
 
         Returns:
             DataFrame with predictions added
         """
         texts = df[text_column].tolist()
-        predictions = self.predict_batch(texts, batch_size=batch_size, return_all_levels=True, top_k=top_k)
+        predictions = self.predict_batch(
+            texts,
+            batch_size=batch_size,
+            return_all_levels=True,
+            top_k=top_k,
+            confidence_threshold=confidence_threshold,
+        )
 
         # Add predictions to DataFrame
         result_df = df.copy()
         result_df["predicted_code"] = [p["code"] for p in predictions]
         result_df["final_level"] = [p["final_level"] for p in predictions]
         result_df["confidence"] = [p["confidence"] for p in predictions]
+        result_df["combined_confidence"] = [p["combined_confidence"] for p in predictions]
 
         # Add individual level columns
         if predictions and "levels" in predictions[0]:
@@ -319,6 +346,7 @@ class HierarchicalCOICOPPredictor:
         text_column: str = "product",
         batch_size: int = 64,
         top_k: int = 1,
+        confidence_threshold: float | None = None,
     ) -> None:
         """Predict codes for a file and save results.
 
@@ -328,6 +356,8 @@ class HierarchicalCOICOPPredictor:
             text_column: Name of the text column
             batch_size: Batch size for prediction
             top_k: Number of top predictions per level
+            confidence_threshold: Minimum confidence per level; stop at the
+                deepest level meeting this threshold.
         """
         input_path = Path(input_path)
         output_path = Path(output_path)
@@ -351,7 +381,13 @@ class HierarchicalCOICOPPredictor:
         logger.info(f"Loaded {len(df)} samples from {input_path}")
 
         # Predict
-        result_df = self.predict_dataframe(df, text_column=text_column, batch_size=batch_size, top_k=top_k)
+        result_df = self.predict_dataframe(
+            df,
+            text_column=text_column,
+            batch_size=batch_size,
+            top_k=top_k,
+            confidence_threshold=confidence_threshold,
+        )
 
         # Save output
         output_path.parent.mkdir(parents=True, exist_ok=True)

@@ -546,18 +546,23 @@ class HierarchicalCOICOPClassifier:
         texts: list[str],
         return_all_levels: bool = True,
         top_k: int = 1,
+        confidence_threshold: float | None = None,
     ) -> dict:
         """Cascade predictions through all 5 levels.
 
         Args:
             texts: List of text strings to classify.
             return_all_levels: Whether to return predictions at each level.
+            top_k: Number of top predictions per level.
+            confidence_threshold: Minimum confidence per level; stop at the
+                deepest level meeting this threshold. None disables thresholding.
 
         Returns:
             Dictionary with:
                 - final_code: Most specific predicted code
                 - final_level: Name of the deepest predicted level
                 - final_confidence: Confidence for final prediction
+                - combined_confidence: Product of per-level confidences up to final level
                 - all_levels: (if return_all_levels) dict of level predictions
         """
         if not self._is_trained:
@@ -661,10 +666,42 @@ class HierarchicalCOICOPClassifier:
                 parent_predictions = predictions
                 parent_confidence = pred_confidence
 
+        # Compute combined_confidence and apply threshold
+        combined_confidence = [1.0] * n
+        for i in range(n):
+            product = 1.0
+            selected_code = ""
+            selected_level = ""
+            selected_conf = 0.0
+            threshold_applied = False
+            for level_name in COICOP_LEVELS:
+                if level_name not in all_levels:
+                    continue
+                level_conf = all_levels[level_name]["confidence"]
+                if top_k > 1:
+                    c = level_conf[i][0]
+                    code = all_levels[level_name]["predictions"][i][0]
+                else:
+                    c = level_conf[i]
+                    code = all_levels[level_name]["predictions"][i]
+                if confidence_threshold is not None and c < confidence_threshold:
+                    threshold_applied = True
+                    break
+                product *= c
+                selected_code = code
+                selected_level = level_name
+                selected_conf = c
+            combined_confidence[i] = product
+            if confidence_threshold is not None and threshold_applied:
+                final_code[i] = selected_code
+                final_level[i] = selected_level
+                final_confidence[i] = selected_conf
+
         result = {
             "final_code": final_code,
             "final_level": final_level,
             "final_confidence": final_confidence.tolist(),
+            "combined_confidence": combined_confidence,
         }
 
         if return_all_levels:
