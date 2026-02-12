@@ -12,7 +12,7 @@ import pandas as pd
 
 from .cascade_classifier import CascadeCOICOPClassifier
 from .hierarchical_classifier import HierarchicalCOICOPClassifier
-
+from .data_preparation import preprocess_text
 if TYPE_CHECKING:
     pass
 
@@ -333,12 +333,20 @@ class HierarchicalCOICOPPredictor:
         output_path = Path(output_path)
 
         # Load input file
+        logger.info(f"Loading texts from {input_path}...")
+
         if input_path.suffix == ".parquet":
             df = pd.read_parquet(input_path)
         elif input_path.suffix == ".csv":
-            df = pd.read_csv(input_path)
+            df = pd.read_csv(input_path, sep=';')
         else:
             raise ValueError(f"Unsupported file format: {input_path.suffix}")
+
+         # Load data
+        with open("data/text/stopwords.json", "r", encoding="utf-8") as json_file:
+            stopwords = json.load(json_file)
+
+        df = preprocess_text(df, text_column, stopwords)
 
         logger.info(f"Loaded {len(df)} samples from {input_path}")
 
