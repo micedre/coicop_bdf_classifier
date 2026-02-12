@@ -98,6 +98,7 @@ def cmd_predict_hierarchical(args: argparse.Namespace) -> None:
             text_column=args.text_column,
             batch_size=args.batch_size,
             top_k=args.top_k,
+            confidence_threshold=args.confidence_threshold,
         )
     else:
         # Text-based prediction
@@ -106,11 +107,14 @@ def cmd_predict_hierarchical(args: argparse.Namespace) -> None:
         else:
             texts = args.texts
 
-        predictions = predictor.predict(texts, top_k=args.top_k)
+        predictions = predictor.predict(
+            texts, top_k=args.top_k, confidence_threshold=args.confidence_threshold
+        )
         for pred in predictions:
             # Format hierarchical output nicely
             print(f"\nText: {pred['text']}")
             print(f"Final code: {pred['code']} (confidence: {pred['confidence']:.2f})")
+            print(f"Combined confidence: {pred['combined_confidence']:.4f}")
             if "levels" in pred:
                 print("Level breakdown:")
                 for level_name, level_data in pred["levels"].items():
@@ -484,6 +488,12 @@ def main() -> int:
         type=int,
         default=1,
         help="Number of top predictions per level (default: 1)",
+    )
+    predict_hier_parser.add_argument(
+        "--confidence-threshold",
+        type=float,
+        default=None,
+        help="Minimum confidence per level; stop at the deepest level meeting this threshold",
     )
     predict_hier_parser.add_argument(
         "texts",
