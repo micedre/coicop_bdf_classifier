@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 
+import duckdb
 import pandas as pd
 
 from src.data_preparation import preprocess_text
@@ -12,6 +14,42 @@ from src.data_preparation import preprocess_text
 logger = logging.getLogger(__name__)
 
 STOPWORDS_PATH = "data/text/stopwords.json"
+
+
+def _configure_s3(con: duckdb.DuckDBPyConnection) -> None:
+    """Configure DuckDB S3 secret for the work bucket."""
+    con.execute(f"""
+        CREATE SECRET secret_ls3 (
+            TYPE S3,
+            KEY_ID '{os.environ["AWS_ACCESS_KEY_ID"]}',
+            SECRET '{os.environ["AWS_SECRET_ACCESS_KEY"]}',
+            ENDPOINT '{os.environ["AWS_S3_ENDPOINT"]}',
+            SESSION_TOKEN '{os.environ["AWS_SESSION_TOKEN"]}',
+            REGION 'us-east-1',
+            URL_STYLE 'path',
+            SCOPE 's3://travail/'
+        );
+    """)
+
+
+def _read_parquet(path: str) -> pd.DataFrame:
+    """Read parquet from local path or S3 URL (with glob support)."""
+    if path.startswith("s3://"):
+        con = duckdb.connect()
+        _configure_s3(con)
+        return con.execute(f"SELECT * FROM '{path}'").df()
+    return pd.read_parquet(path)
+
+
+def _write_parquet(df: pd.DataFrame, path: str) -> None:
+    """Write DataFrame to parquet on local path or S3 URL."""
+    if path.startswith("s3://"):
+        con = duckdb.connect()
+        _configure_s3(con)
+        con.register("__output", df)
+        con.execute(f"COPY __output TO '{path}' (FORMAT PARQUET)")
+        return
+    df.to_parquet(path, index=False)
 
 
 def _load_stopwords() -> list[str]:
@@ -43,7 +81,7 @@ def build_training_data(
 
     # --- DDC data ---
     logger.info("Reading DDC data from %s", ddc_path)
-    ddc = pd.read_parquet(ddc_path)
+    ddc = _read_parquet(ddc_path)
     ddc = ddc.rename(columns={"description_ean": "product", "coicop_code": "code"})
     ddc = ddc[["product", "code"]].copy()
     ddc["source"] = "ddc"
@@ -92,7 +130,7 @@ def build_training_data(
     result = result.drop(columns=["code_level4"])
 
     # --- Save ---
-    result.to_parquet(output_path, index=False)
+    _write_parquet(result, output_path)
 
     # --- Summary ---
     n_ddc = (result["source"] == "ddc").sum()
