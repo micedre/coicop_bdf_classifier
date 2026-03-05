@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import sys
+from pathlib import Path
 
 logging.basicConfig(
     level=logging.INFO,
@@ -234,6 +235,33 @@ def cmd_build_training_data(args: argparse.Namespace) -> None:
         max_per_code=args.max_per_code,
         seed=args.seed,
     )
+
+
+def cmd_evaluate_report(args: argparse.Namespace) -> None:
+    """Generate a comprehensive evaluation report on annotated data."""
+    from src.evaluation_report import run_evaluation, format_report, log_metrics_to_mlflow
+
+    metrics = run_evaluation(
+        model_path=args.model,
+        data_dir=args.data_dir,
+        top_k=args.top_k,
+        text_column=args.text_column,
+        amount_threshold=args.amount_threshold,
+    )
+    report = format_report(metrics)
+    print(report)
+
+    if args.output:
+        Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.output).write_text(report, encoding="utf-8")
+        logger.info(f"Report saved to {args.output}")
+
+    if args.mlflow_run_id or args.mlflow_experiment:
+        log_metrics_to_mlflow(
+            metrics,
+            run_id=args.mlflow_run_id,
+            experiment_name=args.mlflow_experiment,
+        )
 
 
 def cmd_evaluate(args: argparse.Namespace) -> None:
@@ -874,6 +902,61 @@ def main() -> int:
         help="Show detailed classification report",
     )
     eval_parser.set_defaults(func=cmd_evaluate)
+
+    # Evaluate-report command
+    eval_report_parser = subparsers.add_parser(
+        "evaluate-report",
+        help="Generate comprehensive evaluation report on annotated data",
+    )
+    eval_report_parser.add_argument(
+        "--model",
+        type=str,
+        default="checkpoints/basic/basic_model",
+        help="Path to trained model (local dir, runs:/..., or models:/...)",
+    )
+    eval_report_parser.add_argument(
+        "--data-dir",
+        type=str,
+        default="data/annotated",
+        help="Directory with annotated CSVs",
+    )
+    eval_report_parser.add_argument(
+        "--top-k",
+        type=int,
+        default=5,
+        help="Max K for top-k accuracy (default: 5)",
+    )
+    eval_report_parser.add_argument(
+        "--text-column",
+        type=str,
+        default="product",
+        help="Text column after normalization (default: product)",
+    )
+    eval_report_parser.add_argument(
+        "--mlflow-run-id",
+        type=str,
+        default=None,
+        help="Existing MLflow run ID to log metrics to",
+    )
+    eval_report_parser.add_argument(
+        "--mlflow-experiment",
+        type=str,
+        default=None,
+        help="MLflow experiment name (creates new run if no run-id)",
+    )
+    eval_report_parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Save report to file (txt)",
+    )
+    eval_report_parser.add_argument(
+        "--amount-threshold",
+        type=float,
+        default=200,
+        help="Spending threshold in euros (default: 200)",
+    )
+    eval_report_parser.set_defaults(func=cmd_evaluate_report)
 
     # Build-training-data command
     build_data_parser = subparsers.add_parser(
