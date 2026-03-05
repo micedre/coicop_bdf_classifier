@@ -82,7 +82,7 @@ class BasicCOICOPClassifier:
         self,
         df: pd.DataFrame,
         text_column: str = "product",
-        code_column: str = "code",
+        code_column: str = "code8",
         save_dir: str | None = None,
         trainer_params: dict | None = None,
     ) -> dict:
