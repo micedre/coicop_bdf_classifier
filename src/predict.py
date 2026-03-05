@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
+from .basic_classifier import BasicCOICOPClassifier
 from .cascade_classifier import CascadeCOICOPClassifier
 from .hierarchical_classifier import HierarchicalCOICOPClassifier
 from .data_preparation import preprocess_text
@@ -387,6 +388,187 @@ class HierarchicalCOICOPPredictor:
             batch_size=batch_size,
             top_k=top_k,
             confidence_threshold=confidence_threshold,
+        )
+
+        # Save output
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        if output_path.suffix == ".parquet":
+            result_df.to_parquet(output_path, index=False)
+        elif output_path.suffix == ".csv":
+            result_df.to_csv(output_path, index=False)
+        else:
+            result_df.to_csv(output_path, index=False)
+
+        logger.info(f"Saved predictions to {output_path}")
+
+
+class BasicCOICOPPredictor:
+    """Predictor class for basic flat COICOP classification."""
+
+    def __init__(self, model_path: str | Path):
+        """Initialize the predictor with a trained basic model.
+
+        Args:
+            model_path: Path to the saved basic classifier
+        """
+        self.model_path = Path(model_path)
+        self.classifier = BasicCOICOPClassifier.load(self.model_path)
+        logger.info(f"Loaded basic model from {model_path}")
+
+    def predict(
+        self,
+        texts: list[str],
+        top_k: int = 1,
+    ) -> list[dict]:
+        """Predict COICOP codes for input texts.
+
+        Args:
+            texts: List of preprocessed product descriptions.
+            top_k: Number of top predictions.
+
+        Returns:
+            List of prediction dictionaries.
+        """
+        result = self.classifier.predict(texts, top_k=top_k)
+
+        predictions = []
+        for i, text in enumerate(texts):
+            if top_k > 1:
+                pred = {
+                    "text": text,
+                    "code": result["predictions"][i][0],
+                    "confidence": result["confidence"][i][0],
+                    "alternatives": [
+                        {"code": result["predictions"][i][k], "confidence": result["confidence"][i][k]}
+                        for k in range(1, top_k)
+                    ],
+                }
+            else:
+                pred = {
+                    "text": text,
+                    "code": result["predictions"][i],
+                    "confidence": result["confidence"][i],
+                }
+            predictions.append(pred)
+
+        return predictions
+
+    def predict_batch(
+        self,
+        texts: list[str],
+        batch_size: int = 64,
+        top_k: int = 1,
+    ) -> list[dict]:
+        """Predict in batches for large datasets.
+
+        Args:
+            texts: List of product descriptions.
+            batch_size: Number of texts per batch.
+            top_k: Number of top predictions.
+
+        Returns:
+            List of prediction dictionaries.
+        """
+        all_predictions = []
+
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            predictions = self.predict(batch, top_k=top_k)
+            all_predictions.extend(predictions)
+
+            if (i + batch_size) % (batch_size * 10) == 0:
+                logger.info(f"Processed {min(i + batch_size, len(texts))}/{len(texts)}")
+
+        return all_predictions
+
+    def predict_dataframe(
+        self,
+        df: pd.DataFrame,
+        text_column: str = "product",
+        batch_size: int = 64,
+        top_k: int = 1,
+    ) -> pd.DataFrame:
+        """Predict codes for a DataFrame.
+
+        Args:
+            df: DataFrame with text column.
+            text_column: Name of the text column.
+            batch_size: Batch size for prediction.
+            top_k: Number of top predictions.
+
+        Returns:
+            DataFrame with predictions added.
+        """
+        texts = df[text_column].tolist()
+        predictions = self.predict_batch(texts, batch_size=batch_size, top_k=top_k)
+
+        result_df = df.copy()
+        result_df["predicted_code"] = [p["code"] for p in predictions]
+        result_df["confidence"] = [p["confidence"] for p in predictions]
+
+        if top_k > 1:
+            for k in range(1, top_k):
+                rank = k + 1
+                result_df[f"predicted_code_top{rank}"] = [
+                    p.get("alternatives", [{}] * k)[k - 1].get("code", "")
+                    if len(p.get("alternatives", [])) >= k
+                    else ""
+                    for p in predictions
+                ]
+                result_df[f"confidence_top{rank}"] = [
+                    p.get("alternatives", [{}] * k)[k - 1].get("confidence", 0.0)
+                    if len(p.get("alternatives", [])) >= k
+                    else 0.0
+                    for p in predictions
+                ]
+
+        return result_df
+
+    def predict_file(
+        self,
+        input_path: str | Path,
+        output_path: str | Path,
+        text_column: str = "product",
+        batch_size: int = 64,
+        top_k: int = 1,
+    ) -> None:
+        """Predict codes for a file and save results.
+
+        Applies text preprocessing on raw text before prediction.
+
+        Args:
+            input_path: Path to input file (CSV or parquet).
+            output_path: Path to save output file.
+            text_column: Name of the text column.
+            batch_size: Batch size for prediction.
+            top_k: Number of top predictions.
+        """
+        input_path = Path(input_path)
+        output_path = Path(output_path)
+
+        # Load input file
+        logger.info(f"Loading texts from {input_path}...")
+        if input_path.suffix == ".parquet":
+            df = pd.read_parquet(input_path)
+        elif input_path.suffix == ".csv":
+            df = pd.read_csv(input_path, sep=";")
+        else:
+            raise ValueError(f"Unsupported file format: {input_path.suffix}")
+
+        # Preprocess raw text
+        with open("data/text/stopwords.json", "r", encoding="utf-8") as json_file:
+            stopwords = json.load(json_file)
+
+        df = preprocess_text(df, text_column, stopwords)
+
+        logger.info(f"Loaded {len(df)} samples from {input_path}")
+
+        # Predict
+        result_df = self.predict_dataframe(
+            df,
+            text_column=text_column,
+            batch_size=batch_size,
+            top_k=top_k,
         )
 
         # Save output

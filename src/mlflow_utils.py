@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import mlflow.pyfunc
 from pytorch_lightning.loggers import MLFlowLogger
 
 
@@ -45,3 +46,48 @@ def make_trainer_params(
         prefix=prefix,
     )
     return {"logger": logger}
+
+
+class COICOPPyfuncWrapper(mlflow.pyfunc.PythonModel):
+    """End-to-end wrapper: raw text -> preprocess -> predict.
+
+    Wraps a BasicCOICOPClassifier so that it can be served via
+    ``mlflow.pyfunc.load_model`` with automatic text preprocessing.
+    """
+
+    def load_context(self, context):
+        import json
+
+        from .basic_classifier import BasicCOICOPClassifier
+        from .data_preparation import preprocess_text
+
+        self.classifier = BasicCOICOPClassifier.load(context.artifacts["model_dir"])
+
+        with open(context.artifacts["stopwords"], "r", encoding="utf-8") as f:
+            self.stopwords = json.load(f)
+
+        self._preprocess_text = preprocess_text
+
+    def predict(self, context, model_input, params=None):
+        import pandas as pd
+
+        top_k = 1
+        if params and "top_k" in params:
+            top_k = int(params["top_k"])
+
+        df = model_input.copy()
+        df = self._preprocess_text(df, "text", self.stopwords)
+
+        texts = df["text"].tolist()
+        result = self.classifier.predict(texts, top_k=top_k)
+
+        if top_k > 1:
+            return pd.DataFrame({
+                "predicted_code": [codes[0] for codes in result["predictions"]],
+                "confidence": [confs[0] for confs in result["confidence"]],
+            })
+
+        return pd.DataFrame({
+            "predicted_code": result["predictions"],
+            "confidence": result["confidence"],
+        })

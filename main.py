@@ -88,6 +88,53 @@ def cmd_fine_tune_hierarchical(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_train_basic(args: argparse.Namespace) -> None:
+    """Train the basic flat classifier."""
+    from src.train import train_basic_classifier
+
+    train_basic_classifier(
+        data_path=args.data,
+        output_dir=args.output,
+        ngram_min_n=args.ngram_min,
+        ngram_max_n=args.ngram_max,
+        ngram_num_tokens=args.ngram_vocab_size,
+        embedding_dim=args.embedding_dim,
+        max_seq_length=args.max_seq_length,
+        batch_size=args.batch_size,
+        lr=args.lr,
+        num_epochs=args.num_epochs,
+        patience=args.patience,
+        mlflow_experiment=args.mlflow_experiment,
+        eval_data_path=args.eval_data,
+        eval_top_k=args.eval_top_k,
+        eval_text_column=args.eval_text_column,
+    )
+
+
+def cmd_predict_basic(args: argparse.Namespace) -> None:
+    """Predict COICOP codes using basic flat classifier."""
+    from src.predict import BasicCOICOPPredictor
+
+    predictor = BasicCOICOPPredictor(args.model)
+
+    if args.file:
+        predictor.predict_file(
+            input_path=args.file,
+            output_path=args.output,
+            text_column=args.text_column,
+            batch_size=args.batch_size,
+            top_k=args.top_k,
+        )
+    else:
+        predictions = predictor.predict(args.texts, top_k=args.top_k)
+        for pred in predictions:
+            print(f"\nText: {pred['text']}")
+            print(f"Code: {pred['code']} (confidence: {pred['confidence']:.2f})")
+            if "alternatives" in pred:
+                for i, alt in enumerate(pred["alternatives"], start=2):
+                    print(f"  top {i}: {alt['code']} (conf: {alt['confidence']:.2f})")
+
+
 def cmd_predict(args: argparse.Namespace) -> None:
     """Predict COICOP codes."""
     from src.predict import COICOPPredictor
@@ -539,6 +586,151 @@ def main() -> int:
         help="Text column name in evaluation data (default: text)",
     )
     ft_hier_parser.set_defaults(func=cmd_fine_tune_hierarchical)
+
+    # Train-basic command
+    train_basic_parser = subparsers.add_parser(
+        "train-basic",
+        help="Train the basic flat classifier with n-gram tokenization",
+    )
+    train_basic_parser.add_argument(
+        "--data",
+        type=str,
+        required=True,
+        help="Path to training parquet (from build-training-data)",
+    )
+    train_basic_parser.add_argument(
+        "--output",
+        type=str,
+        default="checkpoints/basic",
+        help="Output directory for trained model",
+    )
+    train_basic_parser.add_argument(
+        "--ngram-min",
+        type=int,
+        default=3,
+        help="Minimum n-gram size for tokenizer",
+    )
+    train_basic_parser.add_argument(
+        "--ngram-max",
+        type=int,
+        default=6,
+        help="Maximum n-gram size for tokenizer",
+    )
+    train_basic_parser.add_argument(
+        "--ngram-vocab-size",
+        type=int,
+        default=100000,
+        help="N-gram vocabulary size",
+    )
+    train_basic_parser.add_argument(
+        "--embedding-dim",
+        type=int,
+        default=128,
+        help="Embedding dimension",
+    )
+    train_basic_parser.add_argument(
+        "--max-seq-length",
+        type=int,
+        default=64,
+        help="Maximum sequence length",
+    )
+    train_basic_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=32,
+        help="Training batch size",
+    )
+    train_basic_parser.add_argument(
+        "--lr",
+        type=float,
+        default=0.1,
+        help="Learning rate",
+    )
+    train_basic_parser.add_argument(
+        "--num-epochs",
+        type=int,
+        default=20,
+        help="Maximum number of epochs",
+    )
+    train_basic_parser.add_argument(
+        "--patience",
+        type=int,
+        default=5,
+        help="Early stopping patience",
+    )
+    train_basic_parser.add_argument(
+        "--mlflow-experiment",
+        type=str,
+        default=None,
+        help="MLflow experiment name (enables MLflow + pyfunc logging)",
+    )
+    train_basic_parser.add_argument(
+        "--eval-data",
+        type=str,
+        default=None,
+        help="Path to evaluation parquet for post-training top-k accuracy",
+    )
+    train_basic_parser.add_argument(
+        "--eval-top-k",
+        type=int,
+        default=5,
+        help="Maximum K for top-k accuracy evaluation (default: 5)",
+    )
+    train_basic_parser.add_argument(
+        "--eval-text-column",
+        type=str,
+        default="product",
+        help="Text column name in evaluation data (default: product)",
+    )
+    train_basic_parser.set_defaults(func=cmd_train_basic)
+
+    # Predict-basic command
+    predict_basic_parser = subparsers.add_parser(
+        "predict-basic",
+        help="Predict COICOP codes using basic flat classifier",
+    )
+    predict_basic_parser.add_argument(
+        "--model",
+        type=str,
+        default="checkpoints/basic/basic_model",
+        help="Path to saved basic model",
+    )
+    predict_basic_parser.add_argument(
+        "--file",
+        type=str,
+        default=None,
+        help="Input file for batch prediction",
+    )
+    predict_basic_parser.add_argument(
+        "--output",
+        type=str,
+        default="predictions_basic.csv",
+        help="Output file for batch prediction",
+    )
+    predict_basic_parser.add_argument(
+        "--text-column",
+        type=str,
+        default="product",
+        help="Name of text column in input file",
+    )
+    predict_basic_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=64,
+        help="Batch size for prediction",
+    )
+    predict_basic_parser.add_argument(
+        "--top-k",
+        type=int,
+        default=1,
+        help="Number of top predictions (default: 1)",
+    )
+    predict_basic_parser.add_argument(
+        "texts",
+        nargs="*",
+        help="Text(s) to classify (if not using --file)",
+    )
+    predict_basic_parser.set_defaults(func=cmd_predict_basic)
 
     # Predict command
     predict_parser = subparsers.add_parser("predict", help="Predict COICOP codes")
