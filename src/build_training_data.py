@@ -93,7 +93,10 @@ def build_training_data(
 
     # --- Synthetic data ---
     logger.info("Reading synthetic data from %s", synthetic_path)
-    synthetic = pd.read_csv(synthetic_path, sep=";")
+    synthetic = pd.read_csv(
+        synthetic_path, sep=";", skiprows=1, header=None,
+        usecols=[0, 1], names=["product", "code"],
+    )
     synthetic = synthetic[["product", "code"]].copy()
     synthetic["source"] = "synthetic"
 
@@ -101,6 +104,13 @@ def build_training_data(
     synthetic = preprocess_text(synthetic, "product", stopwords)
     synthetic = synthetic.drop_duplicates(subset=["product", "code"])
     logger.info("Synthetic rows after preprocessing + dedup: %d", len(synthetic))
+
+    # --- 8-char code column & filter DDC to synthetic codes ---
+    ddc["code8"] = ddc["code"].str[:8]
+    synthetic["code8"] = synthetic["code"].str[:8]
+    synthetic_codes = set(synthetic["code8"])
+    ddc = ddc[ddc["code8"].isin(synthetic_codes)]
+    logger.info("DDC rows after filtering to synthetic codes: %d", len(ddc))
 
     # --- Balance at level 4 ---
     ddc["code_level4"] = _extract_level4(ddc["code"])
