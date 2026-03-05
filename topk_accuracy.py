@@ -31,14 +31,14 @@ def detect_max_k(columns: list[str], level: int) -> int:
     return max_k
 
 
-def ensure_true_labels(df: pd.DataFrame) -> pd.DataFrame:
+def ensure_true_labels(df: pd.DataFrame, code_column: str = 'code') -> pd.DataFrame:
     """Add level1-level5 columns from `code` if they are missing."""
     if "level1" in df.columns:
         return df
-    if "code" not in df.columns:
-        print("ERROR: DataFrame has neither level1..level5 nor code column.", file=sys.stderr)
+    if code_column not in df.columns:
+        print(f"ERROR: DataFrame has neither level1..level5 nor {code_column} column.", file=sys.stderr)
         sys.exit(1)
-    levels = df["code"].apply(extract_levels).apply(pd.Series)
+    levels = df[code_column].apply(extract_levels).apply(pd.Series)
     return pd.concat([df, levels], axis=1)
 
 
@@ -128,10 +128,17 @@ def main() -> None:
         help="Keep only rows where these boolean columns are True "
              "(e.g. --filter receips_from_app manual_from_app)",
     )
+
+    parser.add_argument(
+        "--code-column",
+        type=str,
+        default="code",
+        help="The column containing the true code (default: code)",
+    )
     args = parser.parse_args()
 
     df = pd.read_parquet(args.file)
-    df = ensure_true_labels(df)
+    df = ensure_true_labels(df, args.code_column)
 
     # ── Apply boolean filters ─────────────────────────────────────────
     if args.filter:
