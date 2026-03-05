@@ -63,6 +63,31 @@ def cmd_train_hierarchical(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_fine_tune_hierarchical(args: argparse.Namespace) -> None:
+    """Fine-tune a pre-trained hierarchical classifier on new data."""
+    from src.train import fine_tune_hierarchical_classifier
+
+    levels = None
+    if args.levels:
+        levels = [l.strip() for l in args.levels.split(",")]
+
+    fine_tune_hierarchical_classifier(
+        model_path=args.model,
+        annotations_path=args.data,
+        output_dir=args.output,
+        levels=levels,
+        lr=args.lr,
+        num_epochs=args.num_epochs,
+        batch_size=args.batch_size,
+        patience=args.patience,
+        teacher_forcing_ratio=args.teacher_forcing_ratio,
+        mlflow_experiment=args.mlflow_experiment,
+        eval_data_path=args.eval_data,
+        eval_top_k=args.eval_top_k,
+        eval_text_column=args.eval_text_column,
+    )
+
+
 def cmd_predict(args: argparse.Namespace) -> None:
     """Predict COICOP codes."""
     from src.predict import COICOPPredictor
@@ -134,6 +159,33 @@ def cmd_serve(args: argparse.Namespace) -> None:
         host=args.host,
         port=args.port,
         reload=args.reload,
+    )
+
+
+def cmd_extract_ddc(args: argparse.Namespace) -> None:
+    """Extract DDC data from S3."""
+    from src.extract_ddc import extract_ddc
+
+    extract_ddc(
+        annee=args.annee,
+        mois=args.mois,
+        output_s3_path=args.output,
+        famille_circana_path=args.famille,
+        memory_limit=args.memory,
+        dry_run=args.dry_run,
+    )
+
+
+def cmd_build_training_data(args: argparse.Namespace) -> None:
+    """Build a balanced training dataset from DDC and synthetic data."""
+    from src.build_training_data import build_training_data
+
+    build_training_data(
+        ddc_path=args.ddc,
+        output_path=args.output,
+        synthetic_path=args.synthetic,
+        max_per_code=args.max_per_code,
+        seed=args.seed,
     )
 
 
@@ -403,6 +455,91 @@ def main() -> int:
     )
     train_hier_parser.set_defaults(func=cmd_train_hierarchical)
 
+    # Fine-tune-hierarchical command
+    ft_hier_parser = subparsers.add_parser(
+        "fine-tune-hierarchical",
+        help="Fine-tune a pre-trained hierarchical classifier on new data",
+    )
+    ft_hier_parser.add_argument(
+        "--model",
+        type=str,
+        required=True,
+        help="Path to the pre-trained hierarchical model",
+    )
+    ft_hier_parser.add_argument(
+        "--data",
+        type=str,
+        required=True,
+        help="Path to new training data (parquet or csv)",
+    )
+    ft_hier_parser.add_argument(
+        "--output",
+        type=str,
+        required=True,
+        help="Output directory for the fine-tuned model",
+    )
+    ft_hier_parser.add_argument(
+        "--levels",
+        type=str,
+        default=None,
+        help="Comma-separated list of levels to fine-tune (e.g. level3,level4). Default: all",
+    )
+    ft_hier_parser.add_argument(
+        "--lr",
+        type=float,
+        default=None,
+        help="Learning rate (default: original lr / 10)",
+    )
+    ft_hier_parser.add_argument(
+        "--num-epochs",
+        type=int,
+        default=None,
+        help="Number of epochs (default: 5)",
+    )
+    ft_hier_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=None,
+        help="Training batch size (default: same as original)",
+    )
+    ft_hier_parser.add_argument(
+        "--patience",
+        type=int,
+        default=None,
+        help="Early stopping patience (default: 3)",
+    )
+    ft_hier_parser.add_argument(
+        "--teacher-forcing-ratio",
+        type=float,
+        default=None,
+        help="Teacher forcing ratio (default: same as original)",
+    )
+    ft_hier_parser.add_argument(
+        "--mlflow-experiment",
+        type=str,
+        default=None,
+        help="MLflow experiment name (optional)",
+    )
+    ft_hier_parser.add_argument(
+        "--eval-data",
+        type=str,
+        default=None,
+        help="Path to evaluation data for post-training top-k accuracy",
+    )
+    ft_hier_parser.add_argument(
+        "--eval-top-k",
+        type=int,
+        default=5,
+        help="Maximum K for top-k accuracy evaluation (default: 5)",
+    )
+    ft_hier_parser.add_argument(
+        "--eval-text-column",
+        type=str,
+        default="text",
+        help="Text column name in evaluation data (default: text)",
+    )
+    ft_hier_parser.set_defaults(func=cmd_fine_tune_hierarchical)
+
     # Predict command
     predict_parser = subparsers.add_parser("predict", help="Predict COICOP codes")
     predict_parser.add_argument(
@@ -545,6 +682,87 @@ def main() -> int:
         help="Show detailed classification report",
     )
     eval_parser.set_defaults(func=cmd_evaluate)
+
+    # Build-training-data command
+    build_data_parser = subparsers.add_parser(
+        "build-training-data",
+        help="Build a balanced training dataset from DDC extraction and synthetic data",
+    )
+    build_data_parser.add_argument(
+        "--ddc",
+        type=str,
+        required=True,
+        help="Path to DDC parquet file (local, S3, or HTTP URL)",
+    )
+    build_data_parser.add_argument(
+        "--output",
+        type=str,
+        required=True,
+        help="Output parquet file path",
+    )
+    build_data_parser.add_argument(
+        "--synthetic",
+        type=str,
+        default="data/synthetic_data.csv",
+        help="Path to synthetic data CSV (default: data/synthetic_data.csv)",
+    )
+    build_data_parser.add_argument(
+        "--max-per-code",
+        type=int,
+        default=1000,
+        help="Max DDC texts per level-4 code (default: 1000)",
+    )
+    build_data_parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducible sampling (default: 42)",
+    )
+    build_data_parser.set_defaults(func=cmd_build_training_data)
+
+    # Extract-ddc command
+    extract_ddc_parser = subparsers.add_parser(
+        "extract-ddc",
+        help="Extract DDC data from S3 and apply COICOP code mapping",
+    )
+    extract_ddc_parser.add_argument(
+        "--annee",
+        type=int,
+        nargs="+",
+        required=True,
+        help="Year(s) to extract",
+    )
+    extract_ddc_parser.add_argument(
+        "--mois",
+        type=int,
+        nargs="*",
+        default=None,
+        help="Month(s) to extract (default: all months)",
+    )
+    extract_ddc_parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Override S3 output path",
+    )
+    extract_ddc_parser.add_argument(
+        "--famille",
+        type=str,
+        default="data/famille_circana.csv",
+        help="Path to famille_circana mapping CSV",
+    )
+    extract_ddc_parser.add_argument(
+        "--memory",
+        type=str,
+        default="6GB",
+        help="DuckDB memory limit (default: 6GB)",
+    )
+    extract_ddc_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the SQL without executing",
+    )
+    extract_ddc_parser.set_defaults(func=cmd_extract_ddc)
 
     # Serve command
     serve_parser = subparsers.add_parser(

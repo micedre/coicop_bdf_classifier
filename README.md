@@ -139,6 +139,153 @@ uv run python main.py evaluate \
 | `--exclude-technical` | `False` | Exclude 98.x/99.x codes |
 | `--detailed` | `False` | Show detailed report |
 
+## Extraction des données de caisse (DDC)
+
+La commande `extract-ddc` extrait les données de caisse (DDC) depuis le stockage S3 via DuckDB, applique un mapping COICOP, et produit un fichier parquet prêt à l'emploi.
+
+### Fonctionnement détaillé
+
+1. **Lecture S3** : les fichiers parquet DDC sont lus depuis `s3://projet-ddc/.../annee={ANNEE}/mois={MOIS}/` pour les années et mois demandés.
+2. **Dédoublonnage** : les lignes sont dédoublonnées sur le triplet `(description_ean, variete, id_famille)`.
+3. **Mapping COICOP** :
+   - Si la variété commence par `"99"`, le code COICOP est récupéré depuis la table `famille_circana.csv` par jointure sur `id_famille`.
+   - Sinon, le champ `variete` est utilisé directement comme code COICOP.
+4. **Filtrage** : seuls les codes COICOP d'au moins 10 caractères sont conservés, et les codes commençant par `"99"` sont exclus.
+5. **Écriture** : le résultat est écrit en parquet sur S3.
+
+### Colonnes de sortie
+
+| Colonne | Description |
+|---------|-------------|
+| `description_ean` | Texte du produit |
+| `variete` | Code variété d'origine |
+| `coicop_code` | Code COICOP après mapping |
+
+### Commande CLI
+
+```bash
+uv run python main.py extract-ddc \
+    --annee 2024 2025 \
+    --mois 1 2 3 \
+    --famille data/famille_circana.csv \
+    --memory 6GB
+```
+
+#### Arguments
+
+| Argument | Obligatoire | Défaut | Description |
+|----------|:-----------:|--------|-------------|
+| `--annee` | oui | — | Année(s) à extraire |
+| `--mois` | non | tous les mois | Mois à extraire |
+| `--output` | non | `s3://travail/.../ddc_{DATE}.parquet` | Chemin S3 de sortie |
+| `--famille` | non | `data/famille_circana.csv` | Fichier CSV de mapping famille Circana |
+| `--memory` | non | `6GB` | Limite mémoire DuckDB |
+| `--dry-run` | non | `False` | Affiche le SQL généré sans l'exécuter |
+
+### Mode `--dry-run`
+
+Le mode `--dry-run` affiche l'intégralité du SQL qui serait exécuté (création des vues, jointures, `COPY`) sans se connecter à S3. Utile pour vérifier la requête avant exécution.
+
+```bash
+uv run python main.py extract-ddc --annee 2024 --dry-run
+```
+
+## Construction du jeu d'entraînement
+
+La commande `build-training-data` construit un jeu de données équilibré prêt pour l'entraînement à partir des données de caisse (DDC) et de données synthétiques.
+
+### Pipeline de prétraitement textuel
+
+Chaque texte passe par la fonction `preprocess_text` (définie dans `src/data_preparation.py`) qui enchaîne les étapes suivantes :
+
+1. **Translittération Unicode** (`unidecode`) — suppression des accents et caractères spéciaux
+   - `"Crème brûlée BIO"` → `"Creme brulee BIO"`
+2. **Passage en minuscules**
+   - `"Creme brulee BIO"` → `"creme brulee bio"`
+3. **Suppression du bruit** (`remove_noise`) :
+   - Suppression des expressions vides de sens (`"rien"`, `"rien du tout"`)
+   - Suppression de la ponctuation (remplacée par des espaces)
+   - Suppression des chiffres
+   - Suppression des mots d'une seule lettre
+   - Nettoyage des espaces multiples
+   - `"creme brulee bio - 2x125g"` → `"creme brulee bio"`
+4. **Tokenisation et dédoublonnage** (`tokenize_and_clean`) — suppression des mots répétés tout en conservant l'ordre d'apparition
+   - `"lait lait entier lait"` → `"lait entier"`
+5. **Suppression des lignes vides** (`remove_empty_and_strip`)
+6. **Suppression des stopwords** (`remove_stopwords`) — mots courants définis dans `data/text/stopwords.json`
+   - `"boite de conserve de haricots"` → `"boite conserve haricots"`
+
+### Logique d'équilibrage
+
+L'équilibrage opère au **niveau 4 de la COICOP** (préfixe formé des 4 premiers segments du code, ex. `01.1.2.3`). Pour chaque code de niveau 4 :
+
+- **Code surreprésenté** (nombre de lignes DDC > `max_per_code`) → échantillonnage aléatoire de `max_per_code` lignes DDC, pas de données synthétiques ajoutées.
+- **Code sous-représenté** (nombre de lignes DDC ≤ `max_per_code`) → conservation de toutes les lignes DDC + ajout de **toutes** les lignes synthétiques disponibles pour ce code.
+- **Code absent de la DDC** (0 lignes DDC) → inclusion de toutes les lignes synthétiques.
+
+### Flux de données
+
+```
+┌──────────────────┐     ┌──────────────────────┐
+│  DDC (parquet)   │     │ Synthétique (CSV)     │
+└────────┬─────────┘     └──────────┬────────────┘
+         │                          │
+         ▼                          ▼
+┌──────────────────────────────────────────────┐
+│           preprocess_text()                  │
+│  unidecode → lower → bruit → dedup tokens   │
+│  → vides → stopwords                        │
+└──────────────────────┬───────────────────────┘
+                       │
+                       ▼
+            ┌─────────────────────┐
+            │  Dédoublonnage      │
+            │  (product, code)    │
+            └──────────┬──────────┘
+                       │
+                       ▼
+            ┌─────────────────────┐
+            │  Équilibrage        │
+            │  par code niveau 4  │
+            └──────────┬──────────┘
+                       │
+                       ▼
+            ┌─────────────────────┐
+            │  Sortie (parquet)   │
+            │  product, code,     │
+            │  source             │
+            └─────────────────────┘
+```
+
+### Schéma de sortie
+
+| Colonne | Description |
+|---------|-------------|
+| `product` | Texte du produit prétraité |
+| `code` | Code COICOP complet |
+| `source` | Origine de la donnée : `"ddc"` ou `"synthetic"` |
+
+### Commande CLI
+
+```bash
+uv run python main.py build-training-data \
+    --ddc data/raw/ddc.parquet \
+    --output data/data-train.parquet \
+    --synthetic data/synthetic_data.csv \
+    --max-per-code 1000 \
+    --seed 42
+```
+
+#### Arguments
+
+| Argument | Obligatoire | Défaut | Description |
+|----------|:-----------:|--------|-------------|
+| `--ddc` | oui | — | Chemin vers le parquet DDC (local, S3 ou HTTP) |
+| `--output` | oui | — | Chemin du fichier parquet de sortie |
+| `--synthetic` | non | `data/synthetic_data.csv` | Chemin vers le CSV de données synthétiques (séparateur `;`) |
+| `--max-per-code` | non | `1000` | Nombre max de lignes DDC par code de niveau 4 |
+| `--seed` | non | `42` | Graine aléatoire pour la reproductibilité |
+
 ## Python API
 
 ### Training
