@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime
 
 import duckdb
@@ -126,25 +127,25 @@ def extract_ddc(
     con = duckdb.connect()
 
     # Configure S3 secrets
-    con.execute("""
+    con.execute(f"""
         CREATE SECRET secret_prod (
             TYPE S3,
-            KEY_ID getenv('MINIO_PROD_ACCESS_KEY_ID'),
-            SECRET getenv('MINIO_PROD_SECRET_ACCESS_KEY'),
-            ENDPOINT getenv('MINIO_PROD_S3_ENDPOINT'),
+            KEY_ID '{os.environ["MINIO_PROD_ACCESS_KEY_ID"]}',
+            SECRET '{os.environ["MINIO_PROD_SECRET_ACCESS_KEY"]}',
+            ENDPOINT '{os.environ["MINIO_PROD_S3_ENDPOINT"]}',
             SESSION_TOKEN '',
             REGION 'us-east-1',
             URL_STYLE 'path',
             SCOPE 's3://projet-ddc/'
         );
     """)
-    con.execute("""
+    con.execute(f"""
         CREATE SECRET secret_ls3 (
             TYPE S3,
-            KEY_ID getenv('AWS_ACCESS_KEY_ID'),
-            SECRET getenv('AWS_SECRET_ACCESS_KEY'),
-            ENDPOINT getenv('AWS_S3_ENDPOINT'),
-            SESSION_TOKEN getenv('AWS_SESSION_TOKEN'),
+            KEY_ID '{os.environ["AWS_ACCESS_KEY_ID"]}',
+            SECRET '{os.environ["AWS_SECRET_ACCESS_KEY"]}',
+            ENDPOINT '{os.environ["AWS_S3_ENDPOINT"]}',
+            SESSION_TOKEN '{os.environ["AWS_SESSION_TOKEN"]}',
             REGION 'us-east-1',
             URL_STYLE 'path',
             SCOPE 's3://travail/projet-ml-classification-bdf'
