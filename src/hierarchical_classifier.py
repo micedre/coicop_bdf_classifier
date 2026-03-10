@@ -58,6 +58,9 @@ class HierarchicalConfig:
     # Teacher forcing ratio (proportion using ground truth during training)
     teacher_forcing_ratio: float = 0.8
 
+    # Batch size for inference (larger than training since no gradients stored)
+    predict_batch_size: int = 512
+
 
 class HierarchicalCOICOPClassifier:
     """5-level hierarchical classifier with parent prediction features.
@@ -94,6 +97,21 @@ class HierarchicalCOICOPClassifier:
         self.parent_code_to_idx: dict[str, dict[str, int]] = {}
 
         self._is_trained = False
+
+    def _batched_predict(self, classifier, X, top_k=1):
+        """Predict in batches to avoid OOM on large datasets."""
+        batch_size = self.config.predict_batch_size
+        all_preds = []
+        all_confs = []
+        for start in range(0, len(X), batch_size):
+            batch = X[start:start + batch_size]
+            result = classifier.predict(batch, top_k=top_k)
+            all_preds.append(result["prediction"].numpy())
+            all_confs.append(result["confidence"].numpy())
+        return {
+            "prediction": np.concatenate(all_preds),
+            "confidence": np.concatenate(all_confs),
+        }
 
     def _init_tokenizer(self, texts: list[str]) -> None:
         """Train NGramTokenizer on the full corpus.
@@ -517,11 +535,11 @@ class HierarchicalCOICOPClassifier:
             # Generate predictions for next level (on FULL dataset)
             logger.info(f"  Generating predictions for next level...")
             X_full = self._prepare_input_with_features(texts, parent_code_indices, conf_buckets)
-            result = classifier.predict(X_full, top_k=1)
+            result = self._batched_predict(classifier, X_full, top_k=1)
 
             # Store predictions indexed by original DataFrame index
-            pred_indices = result["prediction"].numpy().flatten()
-            pred_confidence = result["confidence"].numpy().flatten()
+            pred_indices = result["prediction"].flatten()
+            pred_confidence = result["confidence"].flatten()
 
             # Create dictionaries mapping original index to predictions
             # This handles non-contiguous DataFrame indices
@@ -537,6 +555,259 @@ class HierarchicalCOICOPClassifier:
 
         logger.info(f"\n{'='*60}")
         logger.info(f"Training complete: {len(self.level_classifiers)} level classifiers")
+        logger.info(f"{'='*60}")
+
+        return metrics
+
+    def fine_tune(
+        self,
+        df: pd.DataFrame,
+        text_column: str = "text",
+        code_column: str = "code",
+        save_dir: str | None = None,
+        mlflow_run_info: dict | None = None,
+        levels: list[str] | None = None,
+        lr: float | None = None,
+        num_epochs: int | None = None,
+        batch_size: int | None = None,
+        patience: int | None = None,
+        teacher_forcing_ratio: float | None = None,
+    ) -> dict:
+        """Fine-tune a pre-trained hierarchical classifier on new data.
+
+        Reuses the existing tokenizer and label/parent mappings.
+        Only updates the weights of the level classifiers.
+
+        Args:
+            df: DataFrame with text and COICOP code columns.
+            text_column: Name of text column.
+            code_column: Name of full COICOP code column.
+            save_dir: Directory to save checkpoints during training.
+            mlflow_run_info: MLflow run info for logging.
+            levels: List of level names to fine-tune (e.g. ["level3", "level4"]).
+                    None means all trained levels.
+            lr: Learning rate override. Default: config.lr / 10.
+            num_epochs: Number of epochs override. Default: 5.
+            batch_size: Batch size override. Default: config.batch_size.
+            patience: Early stopping patience override. Default: 3.
+            teacher_forcing_ratio: Teacher forcing ratio override.
+
+        Returns:
+            Dictionary with training metrics per level.
+        """
+        import pandas as pd
+        from sklearn.model_selection import train_test_split
+
+        from .data_preparation import extract_levels
+
+        if not self._is_trained:
+            raise RuntimeError(
+                "Classifier must be trained before fine-tuning. "
+                "Use train() first or load a pre-trained model."
+            )
+
+        # Resolve which levels to fine-tune
+        trained_levels = list(self.level_classifiers.keys())
+        if levels is not None:
+            for lvl in levels:
+                if lvl not in trained_levels:
+                    raise ValueError(
+                        f"Level '{lvl}' not found in trained levels: {trained_levels}"
+                    )
+            ft_levels = levels
+        else:
+            ft_levels = trained_levels
+
+        # Resolve hyperparameters with fine-tuning defaults
+        ft_lr = lr if lr is not None else self.config.lr / 10
+        ft_num_epochs = num_epochs if num_epochs is not None else 5
+        ft_batch_size = batch_size if batch_size is not None else self.config.batch_size
+        ft_patience = patience if patience is not None else 3
+        ft_teacher_forcing_ratio = (
+            teacher_forcing_ratio
+            if teacher_forcing_ratio is not None
+            else self.config.teacher_forcing_ratio
+        )
+
+        logger.info(f"Fine-tuning levels: {ft_levels}")
+        logger.info(
+            f"  lr={ft_lr}, epochs={ft_num_epochs}, batch_size={ft_batch_size}, "
+            f"patience={ft_patience}, teacher_forcing={ft_teacher_forcing_ratio}"
+        )
+
+        # Prepare data: extract level columns
+        df = df.copy()
+        if "level1" not in df.columns:
+            level_cols = df[code_column].apply(extract_levels).apply(pd.Series)
+            df = pd.concat([df, level_cols], axis=1)
+
+        # Training metrics
+        metrics = {}
+
+        # Track parent predictions for next level
+        parent_predictions: dict[int, str] | None = None
+        parent_confidence: dict[int, float] | None = None
+
+        for level_idx, level_name in enumerate(COICOP_LEVELS):
+            if level_name not in trained_levels:
+                continue
+
+            # Filter to samples that have this level defined
+            level_df = df[df[level_name].notna()].copy()
+
+            # Filter to known labels only
+            known_labels = set(self.level_label_to_idx[level_name].keys())
+            original_count = len(level_df)
+            level_df = level_df[level_df[level_name].isin(known_labels)]
+            n_dropped = original_count - len(level_df)
+            if n_dropped > 0:
+                logger.warning(
+                    f"  {level_name}: {n_dropped} echantillons ignores (labels inconnus)"
+                )
+
+            if len(level_df) < self.config.min_samples_per_level:
+                logger.warning(
+                    f"Skipping {level_name}: insufficient samples "
+                    f"({len(level_df)} < {self.config.min_samples_per_level})"
+                )
+                continue
+
+            should_train = level_name in ft_levels
+
+            logger.info(f"\n{'='*60}")
+            if should_train:
+                logger.info(f"Fine-tuning {level_name.upper()} classifier")
+            else:
+                logger.info(
+                    f"Generating predictions for {level_name.upper()} (not fine-tuned)"
+                )
+            logger.info(f"{'='*60}")
+
+            classifier = self.level_classifiers[level_name]
+
+            # Prepare training data
+            texts = level_df[text_column].tolist()
+            labels = level_df[level_name].tolist()
+            y = np.array([self.level_label_to_idx[level_name][l] for l in labels])
+
+            # Prepare parent features if needed
+            use_parent = level_idx > 0 and self.config.use_parent_features
+            if use_parent:
+                parent_level = COICOP_LEVELS[level_idx - 1]
+                gt_parent_codes = level_df[parent_level].tolist()
+
+                if parent_predictions is not None:
+                    parent_code_list = []
+                    for i, idx in enumerate(level_df.index):
+                        if (
+                            idx in parent_predictions
+                            and np.random.random() < (1 - ft_teacher_forcing_ratio)
+                        ):
+                            parent_code_list.append(parent_predictions[idx])
+                        else:
+                            parent_code_list.append(gt_parent_codes[i])
+                else:
+                    parent_code_list = gt_parent_codes
+
+                parent_code_indices = np.array([
+                    self.parent_code_to_idx[level_name].get(code, 0)
+                    for code in parent_code_list
+                ])
+
+                if parent_confidence is not None:
+                    conf_values = np.array([
+                        parent_confidence.get(idx, 0.9) for idx in level_df.index
+                    ])
+                    conf_buckets = self._discretize_confidence(conf_values)
+                else:
+                    conf_buckets = self._discretize_confidence(
+                        np.ones(len(texts)) * 0.9
+                    )
+            else:
+                parent_code_indices = None
+                conf_buckets = None
+
+            X = self._prepare_input_with_features(texts, parent_code_indices, conf_buckets)
+
+            if should_train:
+                # Train/val split
+                indices = np.arange(len(texts))
+                train_idx, val_idx = train_test_split(
+                    indices,
+                    test_size=0.2,
+                    random_state=42,
+                    stratify=y,
+                )
+
+                X_train, X_val = X[train_idx], X[val_idx]
+                y_train, y_val = y[train_idx], y[val_idx]
+
+                logger.info(
+                    f"  Classes: {len(known_labels)}, Samples: {len(level_df)}"
+                )
+                logger.info(f"  Train: {len(train_idx)}, Val: {len(val_idx)}")
+
+                # Build per-level trainer_params with MLflow logger if available
+                level_trainer_params = None
+                if mlflow_run_info:
+                    from .mlflow_utils import make_trainer_params
+
+                    level_trainer_params = make_trainer_params(
+                        **mlflow_run_info, prefix=level_name
+                    )
+
+                save_path = None
+                if save_dir:
+                    save_path = str(Path(save_dir) / level_name)
+
+                training_config = TrainingConfig(
+                    num_epochs=ft_num_epochs,
+                    batch_size=ft_batch_size,
+                    lr=ft_lr,
+                    patience_early_stopping=ft_patience,
+                    save_path=save_path or f"finetune_{level_name}",
+                    **(
+                        {"trainer_params": level_trainer_params}
+                        if level_trainer_params
+                        else {}
+                    ),
+                )
+
+                classifier.train(
+                    X_train=X_train,
+                    y_train=y_train,
+                    X_val=X_val,
+                    y_val=y_val,
+                    training_config=training_config,
+                    verbose=True,
+                )
+
+                metrics[level_name] = {
+                    "num_classes": len(known_labels),
+                    "train_samples": len(train_idx),
+                    "val_samples": len(val_idx),
+                    "n_dropped": n_dropped,
+                }
+
+            # Generate predictions for next level (on FULL dataset)
+            logger.info(f"  Generating predictions for next level...")
+            X_full = self._prepare_input_with_features(
+                texts, parent_code_indices, conf_buckets
+            )
+            result = self._batched_predict(classifier, X_full, top_k=1)
+
+            pred_indices = result["prediction"].flatten()
+            pred_confidence_arr = result["confidence"].flatten()
+
+            parent_predictions = {}
+            parent_confidence = {}
+            for i, orig_idx in enumerate(level_df.index):
+                pred_label = self.level_idx_to_label[level_name][pred_indices[i]]
+                parent_predictions[orig_idx] = pred_label
+                parent_confidence[orig_idx] = pred_confidence_arr[i]
+
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Fine-tuning complete: {len(metrics)} levels fine-tuned")
         logger.info(f"{'='*60}")
 
         return metrics
@@ -776,6 +1047,7 @@ class HierarchicalCOICOPClassifier:
                 "parent_embedding_dim": self.config.parent_embedding_dim,
                 "confidence_buckets": self.config.confidence_buckets,
                 "teacher_forcing_ratio": self.config.teacher_forcing_ratio,
+                "predict_batch_size": self.config.predict_batch_size,
             },
             "level_label_names": self.level_label_names,
             "level_label_to_idx": self.level_label_to_idx,
