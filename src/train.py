@@ -540,6 +540,7 @@ def train_basic_classifier(
     lr: float = 0.1,
     num_epochs: int = 20,
     patience: int = 5,
+    code_column: str = 'code8',
     mlflow_experiment: str | None = None,
     eval_data_path: str | None = None,
     eval_top_k: int = 5,
@@ -580,7 +581,7 @@ def train_basic_classifier(
     df = pd.read_parquet(data_path)
     logger.info(f"Loaded {len(df)} samples")
 
-    unique_codes = df["code"].nunique()
+    unique_codes = df[code_column].nunique()
     logger.info(f"Unique codes: {unique_codes}")
 
     # Initialize MLflow if experiment name provided
@@ -630,7 +631,7 @@ def train_basic_classifier(
     metrics = classifier.train(
         df=df,
         text_column="product",
-        code_column="code",
+        code_column=code_column,
         save_dir=str(output_path / "checkpoints"),
         trainer_params=trainer_params,
     )
