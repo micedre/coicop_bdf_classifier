@@ -320,6 +320,8 @@ class HierarchicalCOICOPClassifier:
         code_column: str = "code",
         save_dir: str | None = None,
         mlflow_run_info: dict | None = None,
+        resume_from: str | None = None,
+        checkpoint_path: str | None = None,
     ) -> dict:
         """Train all level classifiers sequentially.
 
@@ -331,6 +333,9 @@ class HierarchicalCOICOPClassifier:
             text_column: Name of text column.
             code_column: Name of full COICOP code column.
             save_dir: Directory to save checkpoints during training.
+            mlflow_run_info: MLflow run info for logging.
+            resume_from: Path to a partial checkpoint to resume from.
+            checkpoint_path: Path to save intermediate checkpoints after each level.
 
         Returns:
             Dictionary with training metrics per level.
@@ -347,9 +352,38 @@ class HierarchicalCOICOPClassifier:
             levels = df[code_column].apply(extract_levels).apply(pd.Series)
             df = pd.concat([df, levels], axis=1)
 
-        # Get all texts for tokenizer training
-        all_texts = df[text_column].tolist()
-        self._init_tokenizer(all_texts)
+        # Resume from a previous checkpoint if provided
+        completed_levels: set[str] = set()
+        if resume_from is not None:
+            resume_path = Path(resume_from)
+            if not resume_path.exists():
+                raise FileNotFoundError(f"Resume path does not exist: {resume_path}")
+
+            logger.info(f"Resuming training from {resume_path}")
+            partial = HierarchicalCOICOPClassifier.load(resume_path)
+            completed_levels = set(partial.level_classifiers.keys())
+            logger.info(f"  Previously completed levels: {sorted(completed_levels)}")
+
+            # Restore state from partial model
+            self.tokenizer = partial.tokenizer
+            self.level_classifiers = partial.level_classifiers
+            self.level_label_names = partial.level_label_names
+            self.level_label_to_idx = partial.level_label_to_idx
+            self.level_idx_to_label = partial.level_idx_to_label
+            self.parent_code_to_idx = partial.parent_code_to_idx
+        else:
+            # Get all texts for tokenizer training
+            all_texts = df[text_column].tolist()
+            self._init_tokenizer(all_texts)
+
+        # Check if all levels already completed
+        if completed_levels and all(lv in completed_levels for lv in COICOP_LEVELS):
+            logger.warning("All levels already completed — nothing to resume.")
+            self._is_trained = True
+            return {}
+
+        # Get MLflow run_id for checkpoints
+        mlflow_run_id = mlflow_run_info.get("run_id") if mlflow_run_info else None
 
         # Training metrics
         metrics = {}
@@ -359,8 +393,13 @@ class HierarchicalCOICOPClassifier:
         parent_confidence: dict[int, float] | None = None
 
         for level_idx, level_name in enumerate(COICOP_LEVELS):
+            is_completed = level_name in completed_levels
+
             logger.info(f"\n{'='*60}")
-            logger.info(f"Training {level_name.upper()} classifier")
+            if is_completed:
+                logger.info(f"Skipping {level_name.upper()} (already trained)")
+            else:
+                logger.info(f"Training {level_name.upper()} classifier")
             logger.info(f"{'='*60}")
 
             # Filter to samples that have this level defined
@@ -371,6 +410,60 @@ class HierarchicalCOICOPClassifier:
                     f"Skipping {level_name}: insufficient samples "
                     f"({len(level_df)} < {self.config.min_samples_per_level})"
                 )
+                continue
+
+            if is_completed:
+                # Use loaded mappings — filter to known labels
+                known_labels = set(self.level_label_to_idx[level_name].keys())
+                level_df = level_df[level_df[level_name].isin(known_labels)].copy()
+                texts = level_df[text_column].tolist()
+                classifier = self.level_classifiers[level_name]
+
+                # Prepare parent features for inference
+                use_parent = level_idx > 0 and self.config.use_parent_features
+                if use_parent:
+                    parent_level = COICOP_LEVELS[level_idx - 1]
+                    gt_parent_codes = level_df[parent_level].tolist()
+                    if parent_predictions is not None:
+                        parent_code_list = [
+                            parent_predictions.get(idx, gt)
+                            for gt, idx in zip(gt_parent_codes, level_df.index)
+                        ]
+                    else:
+                        parent_code_list = gt_parent_codes
+                    parent_code_indices = np.array([
+                        self.parent_code_to_idx[level_name].get(code, 0)
+                        for code in parent_code_list
+                    ])
+                    if parent_confidence is not None:
+                        conf_values = np.array([
+                            parent_confidence.get(idx, 0.9) for idx in level_df.index
+                        ])
+                        conf_buckets = self._discretize_confidence(conf_values)
+                    else:
+                        conf_buckets = self._discretize_confidence(
+                            np.ones(len(texts)) * 0.9
+                        )
+                else:
+                    parent_code_indices = None
+                    conf_buckets = None
+
+                # Generate predictions for next level
+                logger.info(f"  Regenerating predictions for next level...")
+                X_full = self._prepare_input_with_features(
+                    texts, parent_code_indices, conf_buckets
+                )
+                result = self._batched_predict(classifier, X_full, top_k=1)
+                pred_indices = result["prediction"].flatten()
+                pred_conf = result["confidence"].flatten()
+
+                parent_predictions = {}
+                parent_confidence = {}
+                for i, orig_idx in enumerate(level_df.index):
+                    pred_label = self.level_idx_to_label[level_name][pred_indices[i]]
+                    parent_predictions[orig_idx] = pred_label
+                    parent_confidence[orig_idx] = pred_conf[i]
+
                 continue
 
             # Get unique labels and build mappings
@@ -551,6 +644,12 @@ class HierarchicalCOICOPClassifier:
                 parent_predictions[orig_idx] = pred_label
                 parent_confidence[orig_idx] = pred_confidence[i]
 
+            # Save intermediate checkpoint after each level
+            if checkpoint_path:
+                self._is_trained = True
+                self.save(checkpoint_path, mlflow_run_id=mlflow_run_id)
+                logger.info(f"  Checkpoint saved to {checkpoint_path}")
+
         self._is_trained = True
 
         logger.info(f"\n{'='*60}")
@@ -572,6 +671,7 @@ class HierarchicalCOICOPClassifier:
         batch_size: int | None = None,
         patience: int | None = None,
         teacher_forcing_ratio: float | None = None,
+        checkpoint_path: str | None = None,
     ) -> dict:
         """Fine-tune a pre-trained hierarchical classifier on new data.
 
@@ -591,6 +691,7 @@ class HierarchicalCOICOPClassifier:
             batch_size: Batch size override. Default: config.batch_size.
             patience: Early stopping patience override. Default: 3.
             teacher_forcing_ratio: Teacher forcing ratio override.
+            checkpoint_path: Path to save intermediate checkpoints after each level.
 
         Returns:
             Dictionary with training metrics per level.
@@ -806,6 +907,11 @@ class HierarchicalCOICOPClassifier:
                 parent_predictions[orig_idx] = pred_label
                 parent_confidence[orig_idx] = pred_confidence_arr[i]
 
+            # Save intermediate checkpoint after each level
+            if checkpoint_path and should_train:
+                self.save(checkpoint_path)
+                logger.info(f"  Checkpoint saved to {checkpoint_path}")
+
         logger.info(f"\n{'='*60}")
         logger.info(f"Fine-tuning complete: {len(metrics)} levels fine-tuned")
         logger.info(f"{'='*60}")
@@ -1006,11 +1112,12 @@ class HierarchicalCOICOPClassifier:
 
         return output
 
-    def save(self, path: str | Path) -> None:
+    def save(self, path: str | Path, mlflow_run_id: str | None = None) -> None:
         """Save the hierarchical classifier.
 
         Args:
             path: Directory path to save all components.
+            mlflow_run_id: Optional MLflow run ID to store in metadata (for resume).
         """
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
@@ -1057,6 +1164,7 @@ class HierarchicalCOICOPClassifier:
             },
             "parent_code_to_idx": self.parent_code_to_idx,
             "trained_levels": list(self.level_classifiers.keys()),
+            "mlflow_run_id": mlflow_run_id,
         }
 
         with open(path / "hierarchical_metadata.pkl", "wb") as f:

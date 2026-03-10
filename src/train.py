@@ -259,6 +259,7 @@ def train_hierarchical_classifier(
     eval_data_path: str | None = None,
     eval_top_k: int = 5,
     eval_text_column: str = "text",
+    resume_from: bool = False,
 ) -> HierarchicalCOICOPClassifier:
     """Train the hierarchical multi-level COICOP classifier.
 
@@ -285,12 +286,17 @@ def train_hierarchical_classifier(
         eval_data_path: Path to evaluation data for post-training metrics
         eval_top_k: Maximum K for top-k accuracy evaluation
         eval_text_column: Text column name in evaluation data
+        resume_from: Whether to resume from a previous checkpoint in output_dir
 
     Returns:
         Trained HierarchicalCOICOPClassifier
     """
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
+
+    # Compute model path early (used for checkpoint and resume)
+    model_path = output_path / "hierarchical_model"
+    resume_path = str(model_path) if resume_from else None
 
     # Load data
     logger.info(f"Loading annotations from {annotations_path}...")
@@ -303,11 +309,25 @@ def train_hierarchical_classifier(
     logger.info(f"Unique codes: {unique_codes}")
     logger.info(f"Level 1 categories: {unique_level1}")
 
+    # Try to reuse MLflow run on resume
+    saved_mlflow_run_id = None
+    if resume_from and model_path.exists():
+        import pickle
+        meta_file = model_path / "hierarchical_metadata.pkl"
+        if meta_file.exists():
+            with open(meta_file, "rb") as f:
+                saved_meta = pickle.load(f)
+            saved_mlflow_run_id = saved_meta.get("mlflow_run_id")
+
     # Initialize MLflow if experiment name provided
     mlflow_run_info = None
     if mlflow_experiment:
         mlflow.set_experiment(mlflow_experiment)
-        mlflow.start_run()
+        if saved_mlflow_run_id:
+            logger.info(f"Resuming MLflow run {saved_mlflow_run_id}")
+            mlflow.start_run(run_id=saved_mlflow_run_id)
+        else:
+            mlflow.start_run()
         mlflow.log_params({
             "classifier_type": "hierarchical",
             "ngram_min_n": ngram_min_n,
@@ -360,6 +380,8 @@ def train_hierarchical_classifier(
         code_column="code",
         save_dir=str(output_path / "checkpoints"),
         mlflow_run_info=mlflow_run_info,
+        resume_from=resume_path,
+        checkpoint_path=str(model_path),
     )
 
     # Log metrics to MLflow
@@ -371,9 +393,9 @@ def train_hierarchical_classifier(
                 f"{level_name}_val_samples": level_metrics["val_samples"],
             })
 
-    # Save the complete classifier
-    model_path = output_path / "hierarchical_model"
-    classifier.save(model_path)
+    # Save the complete classifier (final save with MLflow run_id)
+    mlflow_run_id = mlflow.active_run().info.run_id if mlflow_experiment else None
+    classifier.save(model_path, mlflow_run_id=mlflow_run_id)
     logger.info(f"Model saved to {model_path}")
 
     if mlflow_experiment:
@@ -479,6 +501,7 @@ def fine_tune_hierarchical_classifier(
         }
 
     # Fine-tune
+    ft_model_path = output_path / "hierarchical_model"
     logger.info("Starting fine-tuning...")
     metrics = classifier.fine_tune(
         df=df,
@@ -492,6 +515,7 @@ def fine_tune_hierarchical_classifier(
         batch_size=batch_size,
         patience=patience,
         teacher_forcing_ratio=teacher_forcing_ratio,
+        checkpoint_path=str(ft_model_path),
     )
 
     # Log metrics to MLflow

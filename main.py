@@ -61,6 +61,7 @@ def cmd_train_hierarchical(args: argparse.Namespace) -> None:
         eval_data_path=args.eval_data,
         eval_top_k=args.eval_top_k,
         eval_text_column=args.eval_text_column,
+        resume_from=args.resume,
     )
 
 
@@ -527,6 +528,12 @@ def main() -> int:
         type=str,
         default="text",
         help="Text column name in evaluation data (default: text)",
+    )
+    train_hier_parser.add_argument(
+        "--resume",
+        action="store_true",
+        default=False,
+        help="Resume training from a previous checkpoint (uses output directory)",
     )
     train_hier_parser.set_defaults(func=cmd_train_hierarchical)
 
