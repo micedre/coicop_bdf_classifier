@@ -40,6 +40,9 @@ def _read_parquet(path: str, encryption_key: str | None = None) -> pd.DataFrame:
             _configure_s3(con)
         if encryption_key:
             con.execute(f"PRAGMA add_parquet_key('encryption_key', '{encryption_key}');")
+            return con.execute(
+                f"SELECT * FROM read_parquet('{path}', encryption_config={{footer_key: 'encryption_key'}})"
+            ).df()
         return con.execute(f"SELECT * FROM '{path}'").df()
     return pd.read_parquet(path)
 

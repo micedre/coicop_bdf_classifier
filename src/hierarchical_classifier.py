@@ -49,6 +49,7 @@ class HierarchicalConfig:
     patience: int = 5
 
     # Hierarchical settings
+    max_level: int = 5  # Number of COICOP levels to train/predict (1-5)
     min_samples_per_level: int = 50
     min_samples_per_class: int = 2
     use_parent_features: bool = True
@@ -377,7 +378,8 @@ class HierarchicalCOICOPClassifier:
             self._init_tokenizer(all_texts)
 
         # Check if all levels already completed
-        if completed_levels and all(lv in completed_levels for lv in COICOP_LEVELS):
+        active_levels = COICOP_LEVELS[:self.config.max_level]
+        if completed_levels and all(lv in completed_levels for lv in active_levels):
             logger.warning("All levels already completed — nothing to resume.")
             self._is_trained = True
             return {}
@@ -392,7 +394,7 @@ class HierarchicalCOICOPClassifier:
         parent_predictions: dict[int, str] | None = None
         parent_confidence: dict[int, float] | None = None
 
-        for level_idx, level_name in enumerate(COICOP_LEVELS):
+        for level_idx, level_name in enumerate(active_levels):
             is_completed = level_name in completed_levels
 
             logger.info(f"\n{'='*60}")
@@ -749,7 +751,9 @@ class HierarchicalCOICOPClassifier:
         parent_predictions: dict[int, str] | None = None
         parent_confidence: dict[int, float] | None = None
 
-        for level_idx, level_name in enumerate(COICOP_LEVELS):
+        active_levels = COICOP_LEVELS[:self.config.max_level]
+
+        for level_idx, level_name in enumerate(active_levels):
             if level_name not in trained_levels:
                 continue
 
@@ -956,7 +960,9 @@ class HierarchicalCOICOPClassifier:
         final_confidence = np.zeros(n)
         final_level = [""] * n
 
-        for level_idx, level_name in enumerate(COICOP_LEVELS):
+        active_levels = COICOP_LEVELS[:self.config.max_level]
+
+        for level_idx, level_name in enumerate(active_levels):
             if level_name not in self.level_classifiers:
                 continue
 
@@ -1051,7 +1057,7 @@ class HierarchicalCOICOPClassifier:
             selected_level = ""
             selected_conf = 0.0
             threshold_applied = False
-            for level_name in COICOP_LEVELS:
+            for level_name in active_levels:
                 if level_name not in all_levels:
                     continue
                 level_conf = all_levels[level_name]["confidence"]

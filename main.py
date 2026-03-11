@@ -63,6 +63,7 @@ def cmd_train_hierarchical(args: argparse.Namespace) -> None:
         eval_text_column=args.eval_text_column,
         resume_from=args.resume,
         encryption_key=args.encryption_key,
+        max_level=args.max_level,
     )
 
 
@@ -89,6 +90,7 @@ def cmd_fine_tune_hierarchical(args: argparse.Namespace) -> None:
         eval_top_k=args.eval_top_k,
         eval_text_column=args.eval_text_column,
         encryption_key=args.encryption_key,
+        max_level=args.max_level,
     )
 
 
@@ -547,6 +549,14 @@ def main() -> int:
         default=None,
         help="Parquet encryption key (hex, 32 chars) for reading/writing encrypted files",
     )
+    train_hier_parser.add_argument(
+        "--max-level",
+        type=int,
+        default=5,
+        choices=range(1, 6),
+        metavar="{1,2,3,4,5}",
+        help="Maximum COICOP hierarchy depth to train (1-5, default: 5)",
+    )
     train_hier_parser.set_defaults(func=cmd_train_hierarchical)
 
     # Fine-tune-hierarchical command
@@ -637,6 +647,14 @@ def main() -> int:
         type=str,
         default=None,
         help="Parquet encryption key (hex, 32 chars) for reading/writing encrypted files",
+    )
+    ft_hier_parser.add_argument(
+        "--max-level",
+        type=int,
+        default=None,
+        choices=range(1, 6),
+        metavar="{1,2,3,4,5}",
+        help="Maximum COICOP hierarchy depth (1-5, default: use model's setting)",
     )
     ft_hier_parser.set_defaults(func=cmd_fine_tune_hierarchical)
 

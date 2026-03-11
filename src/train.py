@@ -261,6 +261,7 @@ def train_hierarchical_classifier(
     eval_text_column: str = "text",
     resume_from: bool = False,
     encryption_key: str | None = None,
+    max_level: int = 5,
 ) -> HierarchicalCOICOPClassifier:
     """Train the hierarchical multi-level COICOP classifier.
 
@@ -343,6 +344,7 @@ def train_hierarchical_classifier(
             "min_samples": min_samples,
             "use_parent_features": use_parent_features,
             "teacher_forcing_ratio": teacher_forcing_ratio,
+            "max_level": max_level,
             "num_samples": len(df),
             "unique_codes": unique_codes,
             "unique_level1": unique_level1,
@@ -369,6 +371,7 @@ def train_hierarchical_classifier(
         min_samples_per_level=min_samples,
         use_parent_features=use_parent_features,
         teacher_forcing_ratio=teacher_forcing_ratio,
+        max_level=max_level,
     )
 
     # Create and train classifier
@@ -433,6 +436,7 @@ def fine_tune_hierarchical_classifier(
     eval_top_k: int = 5,
     eval_text_column: str = "text",
     encryption_key: str | None = None,
+    max_level: int | None = None,
 ) -> HierarchicalCOICOPClassifier:
     """Fine-tune a pre-trained hierarchical classifier on new data.
 
@@ -460,6 +464,10 @@ def fine_tune_hierarchical_classifier(
     # Load pre-trained model
     logger.info(f"Loading pre-trained model from {model_path}...")
     classifier = HierarchicalCOICOPClassifier.load(model_path)
+
+    # Override max_level if provided
+    if max_level is not None:
+        classifier.config.max_level = max_level
 
     # Load new data
     logger.info(f"Loading new training data from {annotations_path}...")

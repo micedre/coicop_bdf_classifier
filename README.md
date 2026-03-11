@@ -254,6 +254,7 @@ uv run python main.py train-hierarchical \
 | `--patience` | `5` | Patience pour l'arret precoce |
 | `--min-samples` | `50` | Nombre minimum d'exemples par niveau |
 | `--teacher-forcing-ratio` | `0.8` | Ratio de teacher forcing (0.0-1.0) |
+| `--max-level` | `5` | Profondeur maximale de la hierarchie COICOP a entrainer (1-5) |
 | `--no-parent-features` | — | Desactive les features parentales |
 | `--resume` | `False` | Reprend l'entrainement depuis le dernier checkpoint |
 | `--mlflow-experiment` | `None` | Nom de l'experience MLflow |
@@ -278,6 +279,7 @@ uv run python main.py fine-tune-hierarchical \
 | `--data` | (obligatoire) | Nouvelles donnees d'entrainement |
 | `--output` | (obligatoire) | Repertoire de sortie |
 | `--levels` | tous | Niveaux a affiner (ex: `level3,level4`) |
+| `--max-level` | config du modele | Profondeur maximale de la hierarchie COICOP (1-5) |
 | `--lr` | lr original / 10 | Taux d'apprentissage |
 | `--num-epochs` | `5` | Nombre d'epoques |
 | `--patience` | `3` | Patience pour l'arret precoce |
