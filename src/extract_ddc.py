@@ -168,7 +168,7 @@ def extract_ddc(
     con.execute(f"SET memory_limit = '{memory_limit}';")
 
     if encrypt:
-        key = secrets.token_hex(32)
+        key = secrets.token_hex(16)
         con.execute(f"PRAGMA add_parquet_key('encryption_key', '{key}');")
         logger.info("Clé de chiffrement parquet : %s", key)
         logger.info(

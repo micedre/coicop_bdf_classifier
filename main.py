@@ -544,7 +544,7 @@ def main() -> int:
         "--encryption-key",
         type=str,
         default=None,
-        help="Parquet encryption key (hex, 64 chars) for reading/writing encrypted files",
+        help="Parquet encryption key (hex, 32 chars) for reading/writing encrypted files",
     )
     train_hier_parser.set_defaults(func=cmd_train_hierarchical)
 
@@ -635,7 +635,7 @@ def main() -> int:
         "--encryption-key",
         type=str,
         default=None,
-        help="Parquet encryption key (hex, 64 chars) for reading/writing encrypted files",
+        help="Parquet encryption key (hex, 32 chars) for reading/writing encrypted files",
     )
     ft_hier_parser.set_defaults(func=cmd_fine_tune_hierarchical)
 
@@ -738,7 +738,7 @@ def main() -> int:
         "--encryption-key",
         type=str,
         default=None,
-        help="Parquet encryption key (hex, 64 chars) for reading/writing encrypted files",
+        help="Parquet encryption key (hex, 32 chars) for reading/writing encrypted files",
     )
     train_basic_parser.set_defaults(func=cmd_train_basic)
 
@@ -1027,7 +1027,7 @@ def main() -> int:
         "--encryption-key",
         type=str,
         default=None,
-        help="Parquet encryption key (hex, 64 chars) for reading/writing encrypted files",
+        help="Parquet encryption key (hex, 32 chars) for reading/writing encrypted files",
     )
     build_data_parser.set_defaults(func=cmd_build_training_data)
 

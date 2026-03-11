@@ -156,7 +156,7 @@ uv run python main.py build-training-data \
 | `--synthetic` | non | `data/synthetic_data.csv` | Chemin vers le CSV de donnees synthetiques (separateur `;`) |
 | `--max-per-code` | non | `1000` | Nombre max de lignes DDC par code de niveau 4 |
 | `--seed` | non | `42` | Graine aleatoire pour la reproductibilite |
-| `--encryption-key` | non | `None` | Cle de chiffrement parquet (hex, 64 chars) pour lire/ecrire des fichiers chiffres |
+| `--encryption-key` | non | `None` | Cle de chiffrement parquet (hex, 32 chars) pour lire/ecrire des fichiers chiffres |
 
 ## Classifieurs
 
@@ -199,7 +199,7 @@ uv run python main.py train-basic \
 | `--mlflow-experiment` | `None` | Nom de l'experience MLflow |
 | `--eval-data` | `None` | Parquet d'evaluation post-entrainement |
 | `--eval-top-k` | `5` | K maximal pour l'evaluation top-k |
-| `--encryption-key` | `None` | Cle de chiffrement parquet (hex, 64 chars) pour lire des fichiers chiffres |
+| `--encryption-key` | `None` | Cle de chiffrement parquet (hex, 32 chars) pour lire des fichiers chiffres |
 
 ### Classifieur hierarchique (`train-hierarchical`)
 
@@ -257,7 +257,7 @@ uv run python main.py train-hierarchical \
 | `--resume` | `False` | Reprend l'entrainement depuis le dernier checkpoint |
 | `--mlflow-experiment` | `None` | Nom de l'experience MLflow |
 | `--eval-data` | `None` | Parquet d'evaluation post-entrainement |
-| `--encryption-key` | `None` | Cle de chiffrement parquet (hex, 64 chars) pour lire des fichiers chiffres |
+| `--encryption-key` | `None` | Cle de chiffrement parquet (hex, 32 chars) pour lire des fichiers chiffres |
 
 #### Fine-tuning (`fine-tune-hierarchical`)
 
@@ -280,7 +280,7 @@ uv run python main.py fine-tune-hierarchical \
 | `--lr` | lr original / 10 | Taux d'apprentissage |
 | `--num-epochs` | `5` | Nombre d'epoques |
 | `--patience` | `3` | Patience pour l'arret precoce |
-| `--encryption-key` | `None` | Cle de chiffrement parquet (hex, 64 chars) pour lire des fichiers chiffres |
+| `--encryption-key` | `None` | Cle de chiffrement parquet (hex, 32 chars) pour lire des fichiers chiffres |
 
 #### Reprise apres crash (`--resume`)
 
