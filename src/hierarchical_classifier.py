@@ -59,6 +59,10 @@ class HierarchicalConfig:
     # Teacher forcing ratio (proportion using ground truth during training)
     teacher_forcing_ratio: float = 0.8
 
+    # DataLoader settings
+    num_workers: int = 0  # 0 is safest on Windows (spawn); increase on Linux
+    pin_memory: bool = True  # Pinned memory for faster CPU→GPU transfer
+
     # Batch size for inference (larger than training since no gradients stored)
     predict_batch_size: int = 512
 
@@ -604,6 +608,8 @@ class HierarchicalCOICOPClassifier:
                 lr=self.config.lr,
                 patience_early_stopping=self.config.patience,
                 save_path=save_path or f"hierarchical_{level_name}",
+                num_workers=self.config.num_workers,
+                dataloader_params={"pin_memory": self.config.pin_memory},
                 **({"trainer_params": level_trainer_params} if level_trainer_params else {}),
             )
 
@@ -871,6 +877,8 @@ class HierarchicalCOICOPClassifier:
                     lr=ft_lr,
                     patience_early_stopping=ft_patience,
                     save_path=save_path or f"finetune_{level_name}",
+                    num_workers=self.config.num_workers,
+                    dataloader_params={"pin_memory": self.config.pin_memory},
                     **(
                         {"trainer_params": level_trainer_params}
                         if level_trainer_params

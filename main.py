@@ -64,6 +64,8 @@ def cmd_train_hierarchical(args: argparse.Namespace) -> None:
         resume_from=args.resume,
         encryption_key=args.encryption_key,
         max_level=args.max_level,
+        num_workers=args.num_workers,
+        pin_memory=args.pin_memory,
     )
 
 
@@ -91,6 +93,8 @@ def cmd_fine_tune_hierarchical(args: argparse.Namespace) -> None:
         eval_text_column=args.eval_text_column,
         encryption_key=args.encryption_key,
         max_level=args.max_level,
+        num_workers=args.num_workers,
+        pin_memory=args.pin_memory,
     )
 
 
@@ -557,6 +561,24 @@ def main() -> int:
         metavar="{1,2,3,4,5}",
         help="Maximum COICOP hierarchy depth to train (1-5, default: 5)",
     )
+    train_hier_parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=0,
+        help="DataLoader workers (0 = main process only, safest on Windows; increase on Linux)",
+    )
+    train_hier_parser.add_argument(
+        "--pin-memory",
+        action="store_true",
+        default=True,
+        help="Pin memory for faster CPU→GPU transfer (default: True)",
+    )
+    train_hier_parser.add_argument(
+        "--no-pin-memory",
+        action="store_false",
+        dest="pin_memory",
+        help="Disable pinned memory",
+    )
     train_hier_parser.set_defaults(func=cmd_train_hierarchical)
 
     # Fine-tune-hierarchical command
@@ -655,6 +677,24 @@ def main() -> int:
         choices=range(1, 6),
         metavar="{1,2,3,4,5}",
         help="Maximum COICOP hierarchy depth (1-5, default: use model's setting)",
+    )
+    ft_hier_parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=None,
+        help="DataLoader workers (default: use model's setting)",
+    )
+    ft_hier_parser.add_argument(
+        "--pin-memory",
+        action="store_true",
+        default=None,
+        help="Pin memory for faster CPU→GPU transfer",
+    )
+    ft_hier_parser.add_argument(
+        "--no-pin-memory",
+        action="store_false",
+        dest="pin_memory",
+        help="Disable pinned memory",
     )
     ft_hier_parser.set_defaults(func=cmd_fine_tune_hierarchical)
 

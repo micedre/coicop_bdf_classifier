@@ -262,6 +262,8 @@ def train_hierarchical_classifier(
     resume_from: bool = False,
     encryption_key: str | None = None,
     max_level: int = 5,
+    num_workers: int = 0,
+    pin_memory: bool = True,
 ) -> HierarchicalCOICOPClassifier:
     """Train the hierarchical multi-level COICOP classifier.
 
@@ -372,6 +374,8 @@ def train_hierarchical_classifier(
         use_parent_features=use_parent_features,
         teacher_forcing_ratio=teacher_forcing_ratio,
         max_level=max_level,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
     )
 
     # Create and train classifier
@@ -437,6 +441,8 @@ def fine_tune_hierarchical_classifier(
     eval_text_column: str = "text",
     encryption_key: str | None = None,
     max_level: int | None = None,
+    num_workers: int | None = None,
+    pin_memory: bool | None = None,
 ) -> HierarchicalCOICOPClassifier:
     """Fine-tune a pre-trained hierarchical classifier on new data.
 
@@ -468,6 +474,12 @@ def fine_tune_hierarchical_classifier(
     # Override max_level if provided
     if max_level is not None:
         classifier.config.max_level = max_level
+
+    # Override DataLoader settings if provided
+    if num_workers is not None:
+        classifier.config.num_workers = num_workers
+    if pin_memory is not None:
+        classifier.config.pin_memory = pin_memory
 
     # Load new data
     logger.info(f"Loading new training data from {annotations_path}...")
