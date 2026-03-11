@@ -90,6 +90,7 @@ def extract_ddc(
     memory_limit: str = "6GB",
     dry_run: bool = False,
     encrypt: bool = False,
+    encryption_key: str | None = None,
 ) -> None:
     """Extract DDC data from S3, apply COICOP mapping, and write to parquet.
 
@@ -109,7 +110,11 @@ def extract_ddc(
         If True, print the SQL without executing.
     encrypt : bool
         If True, encrypt the output parquet file (AES-GCM 256 bits).
+    encryption_key : str | None
+        Explicit encryption key (hex, 32 chars). Implies encrypt=True.
     """
+    if encryption_key:
+        encrypt = True
     patterns = _build_source_patterns(annee, mois)
 
     if output_s3_path is None:
@@ -130,7 +135,8 @@ def extract_ddc(
         print("-- S3 secrets configuration (omitted)")
         print(f"SET memory_limit = '{memory_limit}';\n")
         if encrypt:
-            print("PRAGMA add_parquet_key('encryption_key', '<CLÉ_AUTO_GÉNÉRÉE>');\n")
+            key_display = encryption_key if encryption_key else "<CLÉ_AUTO_GÉNÉRÉE>"
+            print(f"PRAGMA add_parquet_key('encryption_key', '{key_display}');\n")
         print(sql)
         print()
         print(copy_stmt)
@@ -168,7 +174,7 @@ def extract_ddc(
     con.execute(f"SET memory_limit = '{memory_limit}';")
 
     if encrypt:
-        key = secrets.token_hex(16)
+        key = encryption_key if encryption_key else secrets.token_hex(16)
         con.execute(f"PRAGMA add_parquet_key('encryption_key', '{key}');")
         logger.info("Clé de chiffrement parquet : %s", key)
         logger.info(

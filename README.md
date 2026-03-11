@@ -76,6 +76,7 @@ uv run python main.py extract-ddc \
 | `--memory` | non | `6GB` | Limite memoire DuckDB |
 | `--dry-run` | non | `False` | Affiche le SQL genere sans l'executer |
 | `--encrypt` | non | `False` | Chiffre le parquet de sortie (AES-GCM 256 bits), affiche la cle dans les logs |
+| `--encryption-key` | non | `None` | Cle de chiffrement parquet (hex, 32 chars). Implique `--encrypt` |
 
 Le mode `--dry-run` affiche l'integralite du SQL qui serait execute sans se connecter a S3 :
 

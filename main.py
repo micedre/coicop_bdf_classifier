@@ -226,6 +226,7 @@ def cmd_extract_ddc(args: argparse.Namespace) -> None:
         memory_limit=args.memory,
         dry_run=args.dry_run,
         encrypt=args.encrypt,
+        encryption_key=args.encryption_key,
     )
 
 
@@ -1077,6 +1078,12 @@ def main() -> int:
         "--encrypt",
         action="store_true",
         help="Encrypt the output parquet file (AES-GCM 256 bits)",
+    )
+    extract_ddc_parser.add_argument(
+        "--encryption-key",
+        type=str,
+        default=None,
+        help="Parquet encryption key (hex, 32 chars). Implies --encrypt",
     )
     extract_ddc_parser.set_defaults(func=cmd_extract_ddc)
 
