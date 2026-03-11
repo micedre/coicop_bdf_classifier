@@ -32,22 +32,32 @@ def _configure_s3(con: duckdb.DuckDBPyConnection) -> None:
     """)
 
 
-def _read_parquet(path: str) -> pd.DataFrame:
+def _read_parquet(path: str, encryption_key: str | None = None) -> pd.DataFrame:
     """Read parquet from local path or S3 URL (with glob support)."""
-    if path.startswith("s3://"):
+    if path.startswith("s3://") or encryption_key:
         con = duckdb.connect()
-        _configure_s3(con)
+        if path.startswith("s3://"):
+            _configure_s3(con)
+        if encryption_key:
+            con.execute(f"PRAGMA add_parquet_key('encryption_key', '{encryption_key}');")
         return con.execute(f"SELECT * FROM '{path}'").df()
     return pd.read_parquet(path)
 
 
-def _write_parquet(df: pd.DataFrame, path: str) -> None:
+def _write_parquet(df: pd.DataFrame, path: str, encryption_key: str | None = None) -> None:
     """Write DataFrame to parquet on local path or S3 URL."""
-    if path.startswith("s3://"):
+    if path.startswith("s3://") or encryption_key:
         con = duckdb.connect()
-        _configure_s3(con)
+        if path.startswith("s3://"):
+            _configure_s3(con)
+        if encryption_key:
+            con.execute(f"PRAGMA add_parquet_key('encryption_key', '{encryption_key}');")
         con.register("__output", df)
-        con.execute(f"COPY __output TO '{path}' (FORMAT PARQUET)")
+        copy = f"COPY __output TO '{path}' (FORMAT PARQUET"
+        if encryption_key:
+            copy += ", ENCRYPTION_CONFIG {footer_key: 'encryption_key'}"
+        copy += ")"
+        con.execute(copy)
         return
     df.to_parquet(path, index=False)
 
@@ -67,6 +77,7 @@ def build_training_data(
     synthetic_path: str = "data/synthetic_data.csv",
     max_per_code: int = 1000,
     seed: int = 42,
+    encryption_key: str | None = None,
 ) -> None:
     """Build a balanced training dataset from DDC and synthetic data.
 
@@ -81,7 +92,7 @@ def build_training_data(
 
     # --- DDC data ---
     logger.info("Reading DDC data from %s", ddc_path)
-    ddc = _read_parquet(ddc_path)
+    ddc = _read_parquet(ddc_path, encryption_key)
     ddc = ddc.rename(columns={"description_ean": "product", "coicop_code": "code"})
     ddc = ddc[["product", "code"]].copy()
     ddc["source"] = "ddc"
@@ -140,7 +151,7 @@ def build_training_data(
     result = result.drop(columns=["code_level4"])
 
     # --- Save ---
-    _write_parquet(result, output_path)
+    _write_parquet(result, output_path, encryption_key)
 
     # --- Summary ---
     n_ddc = (result["source"] == "ddc").sum()

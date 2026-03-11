@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import duckdb
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
@@ -18,6 +19,15 @@ import numpy as np
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+
+def read_parquet(path: str | Path, encryption_key: str | None = None) -> pd.DataFrame:
+    """Read parquet file, with optional DuckDB decryption."""
+    if encryption_key:
+        con = duckdb.connect()
+        con.execute(f"PRAGMA add_parquet_key('encryption_key', '{encryption_key}');")
+        return con.execute(f"SELECT * FROM read_parquet('{path}')").df()
+    return pd.read_parquet(path)
 
 
 def extract_levels(code: str) -> dict[str, str | None]:
@@ -61,17 +71,19 @@ def load_coicop_hierarchy(path: str | Path) -> pd.DataFrame:
 def load_annotations(
     path: str | Path,
     exclude_technical: bool = True,
+    encryption_key: str | None = None,
 ) -> pd.DataFrame:
     """Load and preprocess annotation data.
 
     Args:
         path: Path to annotations.parquet file
         exclude_technical: Whether to exclude 98.x and 99.x technical codes
+        encryption_key: Parquet encryption key for reading encrypted files
 
     Returns:
         DataFrame with product text and hierarchical labels
     """
-    df = pd.read_parquet(path)
+    df = read_parquet(path, encryption_key)
 
     with open("data/text/stopwords.json", "r", encoding="utf-8") as json_file:
         stopwords = json.load(json_file)

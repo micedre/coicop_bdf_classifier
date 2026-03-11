@@ -62,6 +62,7 @@ def cmd_train_hierarchical(args: argparse.Namespace) -> None:
         eval_top_k=args.eval_top_k,
         eval_text_column=args.eval_text_column,
         resume_from=args.resume,
+        encryption_key=args.encryption_key,
     )
 
 
@@ -87,6 +88,7 @@ def cmd_fine_tune_hierarchical(args: argparse.Namespace) -> None:
         eval_data_path=args.eval_data,
         eval_top_k=args.eval_top_k,
         eval_text_column=args.eval_text_column,
+        encryption_key=args.encryption_key,
     )
 
 
@@ -110,6 +112,7 @@ def cmd_train_basic(args: argparse.Namespace) -> None:
         eval_data_path=args.eval_data,
         eval_top_k=args.eval_top_k,
         eval_text_column=args.eval_text_column,
+        encryption_key=args.encryption_key,
     )
 
 
@@ -222,6 +225,7 @@ def cmd_extract_ddc(args: argparse.Namespace) -> None:
         famille_circana_path=args.famille,
         memory_limit=args.memory,
         dry_run=args.dry_run,
+        encrypt=args.encrypt,
     )
 
 
@@ -235,6 +239,7 @@ def cmd_build_training_data(args: argparse.Namespace) -> None:
         synthetic_path=args.synthetic,
         max_per_code=args.max_per_code,
         seed=args.seed,
+        encryption_key=args.encryption_key,
     )
 
 
@@ -535,6 +540,12 @@ def main() -> int:
         default=False,
         help="Resume training from a previous checkpoint (uses output directory)",
     )
+    train_hier_parser.add_argument(
+        "--encryption-key",
+        type=str,
+        default=None,
+        help="Parquet encryption key (hex, 64 chars) for reading/writing encrypted files",
+    )
     train_hier_parser.set_defaults(func=cmd_train_hierarchical)
 
     # Fine-tune-hierarchical command
@@ -619,6 +630,12 @@ def main() -> int:
         type=str,
         default="text",
         help="Text column name in evaluation data (default: text)",
+    )
+    ft_hier_parser.add_argument(
+        "--encryption-key",
+        type=str,
+        default=None,
+        help="Parquet encryption key (hex, 64 chars) for reading/writing encrypted files",
     )
     ft_hier_parser.set_defaults(func=cmd_fine_tune_hierarchical)
 
@@ -716,6 +733,12 @@ def main() -> int:
         type=str,
         default="product",
         help="Text column name in evaluation data (default: product)",
+    )
+    train_basic_parser.add_argument(
+        "--encryption-key",
+        type=str,
+        default=None,
+        help="Parquet encryption key (hex, 64 chars) for reading/writing encrypted files",
     )
     train_basic_parser.set_defaults(func=cmd_train_basic)
 
@@ -1000,6 +1023,12 @@ def main() -> int:
         default=42,
         help="Random seed for reproducible sampling (default: 42)",
     )
+    build_data_parser.add_argument(
+        "--encryption-key",
+        type=str,
+        default=None,
+        help="Parquet encryption key (hex, 64 chars) for reading/writing encrypted files",
+    )
     build_data_parser.set_defaults(func=cmd_build_training_data)
 
     # Extract-ddc command
@@ -1043,6 +1072,11 @@ def main() -> int:
         "--dry-run",
         action="store_true",
         help="Print the SQL without executing",
+    )
+    extract_ddc_parser.add_argument(
+        "--encrypt",
+        action="store_true",
+        help="Encrypt the output parquet file (AES-GCM 256 bits)",
     )
     extract_ddc_parser.set_defaults(func=cmd_extract_ddc)
 

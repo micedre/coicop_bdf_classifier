@@ -260,6 +260,7 @@ def train_hierarchical_classifier(
     eval_top_k: int = 5,
     eval_text_column: str = "text",
     resume_from: bool = False,
+    encryption_key: str | None = None,
 ) -> HierarchicalCOICOPClassifier:
     """Train the hierarchical multi-level COICOP classifier.
 
@@ -300,7 +301,7 @@ def train_hierarchical_classifier(
 
     # Load data
     logger.info(f"Loading annotations from {annotations_path}...")
-    df = load_annotations(annotations_path, exclude_technical=True)
+    df = load_annotations(annotations_path, exclude_technical=True, encryption_key=encryption_key)
     logger.info(f"Loaded {len(df)} samples (excluding 98.x and 99.x codes)")
 
     # Log data statistics
@@ -431,6 +432,7 @@ def fine_tune_hierarchical_classifier(
     eval_data_path: str | None = None,
     eval_top_k: int = 5,
     eval_text_column: str = "text",
+    encryption_key: str | None = None,
 ) -> HierarchicalCOICOPClassifier:
     """Fine-tune a pre-trained hierarchical classifier on new data.
 
@@ -461,7 +463,7 @@ def fine_tune_hierarchical_classifier(
 
     # Load new data
     logger.info(f"Loading new training data from {annotations_path}...")
-    df = load_annotations(annotations_path, exclude_technical=True)
+    df = load_annotations(annotations_path, exclude_technical=True, encryption_key=encryption_key)
     logger.info(f"Loaded {len(df)} samples (excluding 98.x and 99.x codes)")
 
     # Log data statistics
@@ -569,6 +571,7 @@ def train_basic_classifier(
     eval_data_path: str | None = None,
     eval_top_k: int = 5,
     eval_text_column: str = "product",
+    encryption_key: str | None = None,
 ) -> BasicCOICOPClassifier:
     """Train the basic flat COICOP classifier.
 
@@ -595,14 +598,14 @@ def train_basic_classifier(
     Returns:
         Trained BasicCOICOPClassifier.
     """
-    import pandas as pd
+    from .data_preparation import read_parquet
 
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
     # Load data directly (already preprocessed by build-training-data)
     logger.info(f"Loading training data from {data_path}...")
-    df = pd.read_parquet(data_path)
+    df = read_parquet(data_path, encryption_key)
     logger.info(f"Loaded {len(df)} samples")
 
     unique_codes = df[code_column].nunique()

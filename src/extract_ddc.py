@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 from datetime import datetime
 
 import duckdb
@@ -88,6 +89,7 @@ def extract_ddc(
     famille_circana_path: str = "data/famille_circana.csv",
     memory_limit: str = "6GB",
     dry_run: bool = False,
+    encrypt: bool = False,
 ) -> None:
     """Extract DDC data from S3, apply COICOP mapping, and write to parquet.
 
@@ -105,6 +107,8 @@ def extract_ddc(
         DuckDB memory limit.
     dry_run : bool
         If True, print the SQL without executing.
+    encrypt : bool
+        If True, encrypt the output parquet file (AES-GCM 256 bits).
     """
     patterns = _build_source_patterns(annee, mois)
 
@@ -113,11 +117,20 @@ def extract_ddc(
         output_s3_path = f"{DEFAULT_OUTPUT_PREFIX}/ddc_{timestamp}.parquet"
 
     sql = _build_sample_sql(patterns, famille_circana_path)
-    copy_stmt = f"COPY sample TO '{output_s3_path}';"
+
+    if encrypt:
+        copy_stmt = (
+            f"COPY sample TO '{output_s3_path}' "
+            "(ENCRYPTION_CONFIG {footer_key: 'encryption_key'});"
+        )
+    else:
+        copy_stmt = f"COPY sample TO '{output_s3_path}';"
 
     if dry_run:
         print("-- S3 secrets configuration (omitted)")
         print(f"SET memory_limit = '{memory_limit}';\n")
+        if encrypt:
+            print("PRAGMA add_parquet_key('encryption_key', '<CLÉ_AUTO_GÉNÉRÉE>');\n")
         print(sql)
         print()
         print(copy_stmt)
@@ -153,6 +166,14 @@ def extract_ddc(
     """)
 
     con.execute(f"SET memory_limit = '{memory_limit}';")
+
+    if encrypt:
+        key = secrets.token_hex(32)
+        con.execute(f"PRAGMA add_parquet_key('encryption_key', '{key}');")
+        logger.info("Clé de chiffrement parquet : %s", key)
+        logger.info(
+            "Conservez cette clé : elle est nécessaire pour relire le fichier."
+        )
 
     # Execute the sample construction SQL
     for stmt in sql.split(";"):
