@@ -26,7 +26,9 @@ def read_parquet(path: str | Path, encryption_key: str | None = None) -> pd.Data
     if encryption_key:
         con = duckdb.connect()
         con.execute(f"PRAGMA add_parquet_key('encryption_key', '{encryption_key}');")
-        return con.execute(f"SELECT * FROM read_parquet('{path}')").df()
+        return con.execute(
+            f"SELECT * FROM read_parquet('{path}', encryption_config={{footer_key: 'encryption_key'}})"
+        ).df()
     return pd.read_parquet(path)
 
 
