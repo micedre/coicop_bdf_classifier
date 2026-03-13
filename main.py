@@ -897,7 +897,7 @@ def main() -> int:
         "--model",
         type=str,
         default="checkpoints/hierarchical/hierarchical_model",
-        help="Path to saved hierarchical model",
+        help="Path to saved hierarchical model or MLflow URI (runs:/..., models:/..., mlflow-artifacts:/...)",
     )
     predict_hier_parser.add_argument(
         "--input",
@@ -1153,7 +1153,7 @@ def main() -> int:
         "--model",
         type=str,
         default="checkpoints/hierarchical/hierarchical_model",
-        help="Path to saved hierarchical model",
+        help="Path to saved hierarchical model or MLflow URI (runs:/..., models:/..., mlflow-artifacts:/...)",
     )
     serve_parser.add_argument(
         "--host",

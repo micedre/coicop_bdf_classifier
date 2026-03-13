@@ -170,8 +170,15 @@ class HierarchicalCOICOPPredictor:
         """Initialize the predictor with a trained hierarchical model.
 
         Args:
-            model_path: Path to the saved hierarchical classifier
+            model_path: Path to the saved hierarchical classifier, or an MLflow
+                artifact URI (runs:/, models:/, mlflow-artifacts:/)
         """
+        model_path_str = str(model_path)
+        if any(model_path_str.startswith(p) for p in ("runs:/", "models:/", "mlflow-artifacts:/")):
+            import mlflow
+            logger.info(f"Downloading MLflow artifacts from {model_path_str}...")
+            model_path = mlflow.artifacts.download_artifacts(artifact_uri=model_path_str)
+            logger.info(f"Downloaded to {model_path}")
         self.model_path = Path(model_path)
         self.classifier = HierarchicalCOICOPClassifier.load(self.model_path)
         logger.info(f"Loaded hierarchical model from {model_path}")
