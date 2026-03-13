@@ -91,3 +91,74 @@ class COICOPPyfuncWrapper(mlflow.pyfunc.PythonModel):
             "predicted_code": result["predictions"],
             "confidence": result["confidence"],
         })
+
+
+class HierarchicalCOICOPPyfuncWrapper(mlflow.pyfunc.PythonModel):
+    """End-to-end wrapper: raw text -> preprocess -> hierarchical predict.
+
+    Wraps a HierarchicalCOICOPClassifier so that it can be served via
+    ``mlflow.pyfunc.load_model`` with automatic text preprocessing.
+    """
+
+    def load_context(self, context):
+        import json
+
+        from .hierarchical_classifier import HierarchicalCOICOPClassifier
+        from .data_preparation import preprocess_text
+
+        self.classifier = HierarchicalCOICOPClassifier.load(
+            context.artifacts["model_dir"]
+        )
+
+        with open(context.artifacts["stopwords"], "r", encoding="utf-8") as f:
+            self.stopwords = json.load(f)
+
+        self._preprocess_text = preprocess_text
+
+    def predict(self, context, model_input, params=None):
+        import pandas as pd
+
+        top_k = 1
+        if params and "top_k" in params:
+            top_k = int(params["top_k"])
+
+        df = model_input.copy()
+        df = self._preprocess_text(df, "text", self.stopwords)
+
+        texts = df["text"].tolist()
+        result = self.classifier.predict(
+            texts, return_all_levels=True, top_k=top_k
+        )
+
+        # Build output DataFrame
+        output = {
+            "predicted_code": result["final_code"],
+            "confidence": result["final_confidence"],
+            "combined_confidence": result["combined_confidence"],
+        }
+
+        if "all_levels" in result:
+            for level_name, level_data in result["all_levels"].items():
+                if top_k > 1:
+                    # level_data["predictions"][i] is list[str]
+                    output[f"predicted_{level_name}"] = [
+                        preds[0] for preds in level_data["predictions"]
+                    ]
+                    output[f"confidence_{level_name}"] = [
+                        confs[0] for confs in level_data["confidence"]
+                    ]
+                    for k in range(1, top_k):
+                        rank = k + 1
+                        output[f"predicted_{level_name}_top{rank}"] = [
+                            preds[k] if k < len(preds) else ""
+                            for preds in level_data["predictions"]
+                        ]
+                        output[f"confidence_{level_name}_top{rank}"] = [
+                            confs[k] if k < len(confs) else 0.0
+                            for confs in level_data["confidence"]
+                        ]
+                else:
+                    output[f"predicted_{level_name}"] = level_data["predictions"]
+                    output[f"confidence_{level_name}"] = level_data["confidence"]
+
+        return pd.DataFrame(output)

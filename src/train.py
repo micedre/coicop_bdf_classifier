@@ -420,6 +420,19 @@ def train_hierarchical_classifier(
             mlflow.log_metrics(eval_metrics)
 
         mlflow.log_artifacts(str(model_path), artifact_path="model")
+
+        # Log pyfunc model for end-to-end serving
+        from .mlflow_utils import HierarchicalCOICOPPyfuncWrapper
+
+        mlflow.pyfunc.log_model(
+            artifact_path="pyfunc_model",
+            python_model=HierarchicalCOICOPPyfuncWrapper(),
+            artifacts={
+                "model_dir": str(model_path),
+                "stopwords": "data/text/stopwords.json",
+            },
+        )
+
         mlflow.end_run()
 
     return classifier
@@ -569,6 +582,19 @@ def fine_tune_hierarchical_classifier(
             mlflow.log_metrics(eval_metrics)
 
         mlflow.log_artifacts(str(ft_model_path), artifact_path="model")
+
+        # Log pyfunc model for end-to-end serving
+        from .mlflow_utils import HierarchicalCOICOPPyfuncWrapper
+
+        mlflow.pyfunc.log_model(
+            artifact_path="pyfunc_model",
+            python_model=HierarchicalCOICOPPyfuncWrapper(),
+            artifacts={
+                "model_dir": str(ft_model_path),
+                "stopwords": "data/text/stopwords.json",
+            },
+        )
+
         mlflow.end_run()
 
     return classifier

@@ -43,6 +43,9 @@ torchvision = [
 ]
 
 [dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
 torch = [
     "torch>=2.7.1",
 ]
