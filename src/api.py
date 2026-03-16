@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
-from .predict import HierarchicalCOICOPPredictor
+from .predict import HierarchicalCOICOPPredictor, MultiHeadCOICOPPredictor
 
 logging.basicConfig(
     level=logging.INFO,
@@ -93,8 +93,16 @@ class ModelInfoResponse(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     model_path = os.environ.get("COICOP_MODEL_PATH", DEFAULT_MODEL_PATH)
-    logger.info("Loading hierarchical model from %s ...", model_path)
-    predictor = HierarchicalCOICOPPredictor(model_path)
+    logger.info("Loading model from %s ...", model_path)
+
+    # Detect model type
+    model_dir = Path(model_path)
+    if (model_dir / "multihead_metadata.pkl").exists():
+        logger.info("Detected multi-head model")
+        predictor = MultiHeadCOICOPPredictor(model_path)
+    else:
+        predictor = HierarchicalCOICOPPredictor(model_path)
+
     app.state.predictor = predictor
     logger.info("Model loaded successfully.")
     yield
@@ -204,7 +212,12 @@ async def predict_batch(body: PredictBatchRequest, request: Request):
 async def model_info(request: Request):
     predictor = _get_predictor(request)
     classifier = predictor.classifier
-    trained_levels = list(classifier.level_classifiers.keys())
+
+    if isinstance(predictor, MultiHeadCOICOPPredictor):
+        trained_levels = list(classifier.level_names)
+    else:
+        trained_levels = list(classifier.level_classifiers.keys())
+
     level_class_counts = {
         level: len(labels) for level, labels in classifier.level_label_names.items()
     }

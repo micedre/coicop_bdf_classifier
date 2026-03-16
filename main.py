@@ -207,6 +207,80 @@ def cmd_predict_hierarchical(args: argparse.Namespace) -> None:
                             print(f"    top {i}: {alt['code']} (conf: {alt['confidence']:.2f})")
 
 
+def cmd_train_multihead(args: argparse.Namespace) -> None:
+    """Train the multi-head classifier with shared backbone."""
+    from src.train import train_multihead_classifier
+
+    loss_weights = None
+    if args.loss_weights:
+        loss_weights = [float(w) for w in args.loss_weights.split(",")]
+
+    train_multihead_classifier(
+        annotations_path=args.data,
+        output_dir=args.output,
+        ngram_min_n=args.ngram_min,
+        ngram_max_n=args.ngram_max,
+        ngram_num_tokens=args.ngram_vocab_size,
+        embedding_dim=args.embedding_dim,
+        max_seq_length=args.max_seq_length,
+        n_attention_layers=args.n_attention_layers,
+        n_attention_heads=args.n_attention_heads,
+        n_kv_heads=args.n_kv_heads,
+        n_label_attention_heads=args.n_label_attention_heads,
+        batch_size=args.batch_size,
+        lr=args.lr,
+        num_epochs=args.num_epochs,
+        patience=args.patience,
+        min_samples=args.min_samples,
+        max_level=args.max_level,
+        loss_weights=loss_weights,
+        mlflow_experiment=args.mlflow_experiment,
+        eval_data_path=args.eval_data,
+        eval_top_k=args.eval_top_k,
+        eval_text_column=args.eval_text_column,
+        encryption_key=args.encryption_key,
+        num_workers=args.num_workers,
+        pin_memory=args.pin_memory,
+    )
+
+
+def cmd_predict_multihead(args: argparse.Namespace) -> None:
+    """Predict COICOP codes using multi-head classifier."""
+    from src.predict import MultiHeadCOICOPPredictor
+
+    predictor = MultiHeadCOICOPPredictor(args.model)
+
+    if args.file:
+        predictor.predict_file(
+            input_path=args.file,
+            output_path=args.output,
+            text_column=args.text_column,
+            batch_size=args.batch_size,
+            top_k=args.top_k,
+            confidence_threshold=args.confidence_threshold,
+        )
+    else:
+        if args.input:
+            texts = [args.input]
+        else:
+            texts = args.texts
+
+        predictions = predictor.predict(
+            texts, top_k=args.top_k, confidence_threshold=args.confidence_threshold
+        )
+        for pred in predictions:
+            print(f"\nText: {pred['text']}")
+            print(f"Final code: {pred['code']} (confidence: {pred['confidence']:.2f})")
+            print(f"Combined confidence: {pred['combined_confidence']:.4f}")
+            if "levels" in pred:
+                print("Level breakdown:")
+                for level_name, level_data in pred["levels"].items():
+                    print(f"  {level_name}: {level_data['code']} (conf: {level_data['confidence']:.2f})")
+                    if "alternatives" in level_data:
+                        for i, alt in enumerate(level_data["alternatives"], start=2):
+                            print(f"    top {i}: {alt['code']} (conf: {alt['confidence']:.2f})")
+
+
 def cmd_serve(args: argparse.Namespace) -> None:
     """Start the FastAPI prediction server."""
     import uvicorn
@@ -947,6 +1021,231 @@ def main() -> int:
         help="Text(s) to classify (if not using --file or --input)",
     )
     predict_hier_parser.set_defaults(func=cmd_predict_hierarchical)
+
+    # Train-multihead command
+    train_mh_parser = subparsers.add_parser(
+        "train-multihead",
+        help="Train the multi-head classifier with shared backbone",
+    )
+    train_mh_parser.add_argument(
+        "--data",
+        type=str,
+        default="data/data-train.parquet",
+        help="Path to training data (parquet or csv)",
+    )
+    train_mh_parser.add_argument(
+        "--output",
+        type=str,
+        default="checkpoints/multihead",
+        help="Output directory for trained models",
+    )
+    train_mh_parser.add_argument(
+        "--ngram-min",
+        type=int,
+        default=3,
+        help="Minimum n-gram size for tokenizer",
+    )
+    train_mh_parser.add_argument(
+        "--ngram-max",
+        type=int,
+        default=6,
+        help="Maximum n-gram size for tokenizer",
+    )
+    train_mh_parser.add_argument(
+        "--ngram-vocab-size",
+        type=int,
+        default=100000,
+        help="Vocabulary size for n-gram tokenizer",
+    )
+    train_mh_parser.add_argument(
+        "--embedding-dim",
+        type=int,
+        default=128,
+        help="Text embedding dimension",
+    )
+    train_mh_parser.add_argument(
+        "--max-seq-length",
+        type=int,
+        default=64,
+        help="Maximum sequence length",
+    )
+    train_mh_parser.add_argument(
+        "--n-attention-layers",
+        type=int,
+        default=2,
+        help="Number of transformer blocks in shared backbone",
+    )
+    train_mh_parser.add_argument(
+        "--n-attention-heads",
+        type=int,
+        default=4,
+        help="Attention heads per self-attention layer",
+    )
+    train_mh_parser.add_argument(
+        "--n-kv-heads",
+        type=int,
+        default=4,
+        help="KV heads (GQA if < n-attention-heads)",
+    )
+    train_mh_parser.add_argument(
+        "--n-label-attention-heads",
+        type=int,
+        default=4,
+        help="Attention heads in each LabelAttentionClassifier head",
+    )
+    train_mh_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=32,
+        help="Training batch size",
+    )
+    train_mh_parser.add_argument(
+        "--lr",
+        type=float,
+        default=0.01,
+        help="Learning rate",
+    )
+    train_mh_parser.add_argument(
+        "--num-epochs",
+        type=int,
+        default=20,
+        help="Maximum number of epochs",
+    )
+    train_mh_parser.add_argument(
+        "--patience",
+        type=int,
+        default=5,
+        help="Early stopping patience",
+    )
+    train_mh_parser.add_argument(
+        "--min-samples",
+        type=int,
+        default=50,
+        help="Minimum samples per level",
+    )
+    train_mh_parser.add_argument(
+        "--max-level",
+        type=int,
+        default=4,
+        choices=range(1, 6),
+        metavar="{1,2,3,4,5}",
+        help="Maximum COICOP hierarchy depth to train (1-5, default: 4)",
+    )
+    train_mh_parser.add_argument(
+        "--loss-weights",
+        type=str,
+        default=None,
+        help="Comma-separated per-level loss weights (e.g. 1.0,1.0,1.0,1.0)",
+    )
+    train_mh_parser.add_argument(
+        "--mlflow-experiment",
+        type=str,
+        default=None,
+        help="MLflow experiment name (optional)",
+    )
+    train_mh_parser.add_argument(
+        "--eval-data",
+        type=str,
+        default=None,
+        help="Path to evaluation parquet for post-training top-k accuracy",
+    )
+    train_mh_parser.add_argument(
+        "--eval-top-k",
+        type=int,
+        default=5,
+        help="Maximum K for top-k accuracy evaluation (default: 5)",
+    )
+    train_mh_parser.add_argument(
+        "--eval-text-column",
+        type=str,
+        default="text",
+        help="Text column name in evaluation data (default: text)",
+    )
+    train_mh_parser.add_argument(
+        "--encryption-key",
+        type=str,
+        default=None,
+        help="Parquet encryption key (hex, 32 chars) for reading encrypted files",
+    )
+    train_mh_parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=0,
+        help="DataLoader workers (0 = main process only)",
+    )
+    train_mh_parser.add_argument(
+        "--pin-memory",
+        action="store_true",
+        default=True,
+        help="Pin memory for faster CPU->GPU transfer (default: True)",
+    )
+    train_mh_parser.add_argument(
+        "--no-pin-memory",
+        action="store_false",
+        dest="pin_memory",
+        help="Disable pinned memory",
+    )
+    train_mh_parser.set_defaults(func=cmd_train_multihead)
+
+    # Predict-multihead command
+    predict_mh_parser = subparsers.add_parser(
+        "predict-multihead",
+        help="Predict COICOP codes using multi-head classifier",
+    )
+    predict_mh_parser.add_argument(
+        "--model",
+        type=str,
+        default="checkpoints/multihead/multihead_model",
+        help="Path to saved multi-head model or MLflow URI",
+    )
+    predict_mh_parser.add_argument(
+        "--input",
+        type=str,
+        default=None,
+        help="Single text to classify",
+    )
+    predict_mh_parser.add_argument(
+        "--file",
+        type=str,
+        default=None,
+        help="Input file for batch prediction",
+    )
+    predict_mh_parser.add_argument(
+        "--output",
+        type=str,
+        default="predictions_multihead.csv",
+        help="Output file for batch prediction",
+    )
+    predict_mh_parser.add_argument(
+        "--text-column",
+        type=str,
+        default="product",
+        help="Name of text column in input file",
+    )
+    predict_mh_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=64,
+        help="Batch size for prediction",
+    )
+    predict_mh_parser.add_argument(
+        "--top-k",
+        type=int,
+        default=1,
+        help="Number of top predictions per level (default: 1)",
+    )
+    predict_mh_parser.add_argument(
+        "--confidence-threshold",
+        type=float,
+        default=None,
+        help="Minimum confidence per level; stop at deepest level meeting this threshold",
+    )
+    predict_mh_parser.add_argument(
+        "texts",
+        nargs="*",
+        help="Text(s) to classify (if not using --file or --input)",
+    )
+    predict_mh_parser.set_defaults(func=cmd_predict_multihead)
 
     # Evaluate command
     eval_parser = subparsers.add_parser("evaluate", help="Evaluate the classifier")
