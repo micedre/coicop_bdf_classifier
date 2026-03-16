@@ -445,11 +445,9 @@ def train_hierarchical_classifier(
         mlflow.log_artifacts(str(model_path), artifact_path="model")
 
         # Log pyfunc model for end-to-end serving
-        from .mlflow_utils import HierarchicalCOICOPPyfuncWrapper
-
         mlflow.pyfunc.log_model(
-            artifact_path="pyfunc_model",
-            python_model=HierarchicalCOICOPPyfuncWrapper(),
+            name="pyfunc_model",
+            python_model="src/mlflow_model_hierarchical.py",
             artifacts={
                 "model_dir": str(model_path),
                 "stopwords": "data/text/stopwords.json",
@@ -610,11 +608,9 @@ def fine_tune_hierarchical_classifier(
         mlflow.log_artifacts(str(ft_model_path), artifact_path="model")
 
         # Log pyfunc model for end-to-end serving
-        from .mlflow_utils import HierarchicalCOICOPPyfuncWrapper
-
         mlflow.pyfunc.log_model(
-            artifact_path="pyfunc_model",
-            python_model=HierarchicalCOICOPPyfuncWrapper(),
+            name="pyfunc_model",
+            python_model="src/mlflow_model_hierarchical.py",
             artifacts={
                 "model_dir": str(ft_model_path),
                 "stopwords": "data/text/stopwords.json",
@@ -766,11 +762,9 @@ def train_basic_classifier(
         mlflow.log_artifacts(str(model_path), artifact_path="model")
 
         # Log pyfunc model for end-to-end serving
-        from .mlflow_utils import COICOPPyfuncWrapper
-
         mlflow.pyfunc.log_model(
-            artifact_path="pyfunc_model",
-            python_model=COICOPPyfuncWrapper(),
+            name="pyfunc_model",
+            python_model="src/mlflow_model_cascade.py",
             artifacts={
                 "model_dir": str(model_path),
                 "stopwords": "data/text/stopwords.json",
@@ -958,11 +952,9 @@ def train_multihead_classifier(
         mlflow.log_artifacts(str(model_path), artifact_path="model")
 
         # Log pyfunc model
-        from .mlflow_utils import MultiHeadCOICOPPyfuncWrapper
-
         mlflow.pyfunc.log_model(
-            artifact_path="pyfunc_model",
-            python_model=MultiHeadCOICOPPyfuncWrapper(),
+            name="pyfunc_model",
+            python_model="src/mlflow_model_multihead.py",
             artifacts={
                 "model_dir": str(model_path),
                 "stopwords": "data/text/stopwords.json",

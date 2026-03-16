@@ -157,6 +157,21 @@ class MultiHeadClassificationModel(nn.Module):
         )
 
         # Shared transformer backbone
+        head_dim = embedding_dim // n_attention_heads
+        if embedding_dim % n_attention_heads != 0:
+            raise ValueError(
+                f"embedding_dim ({embedding_dim}) must be divisible by n_attention_heads ({n_attention_heads})."
+            )
+        if head_dim % 2 != 0:
+            raise ValueError(
+                f"embedding_dim / n_attention_heads must be even for rotary positional embeddings. "
+                f"Got head_dim={head_dim} (embedding_dim={embedding_dim}, n_attention_heads={n_attention_heads})."
+            )
+        if embedding_dim % n_label_attention_heads != 0:
+            raise ValueError(
+                f"embedding_dim ({embedding_dim}) must be divisible by n_label_attention_heads ({n_label_attention_heads})."
+            )
+
         attention_config = AttentionConfig(
             n_layers=n_attention_layers,
             n_head=n_attention_heads,
@@ -172,7 +187,6 @@ class MultiHeadClassificationModel(nn.Module):
         ])
 
         # Precompute RoPE
-        head_dim = embedding_dim // n_attention_heads
         self.rotary_seq_len = max_seq_length * 10
         cos, sin = self._precompute_rotary_embeddings(self.rotary_seq_len, head_dim)
         self.register_buffer("cos", cos, persistent=False)
