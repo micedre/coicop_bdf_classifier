@@ -1,4 +1,4 @@
-"""MLflow 'models from code' definition for the cascade classifier."""
+"""MLflow 'models from code' definition for the basic classifier."""
 
 import mlflow
 

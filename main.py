@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
 import sys
@@ -14,28 +13,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-
-def cmd_train(args: argparse.Namespace) -> None:
-    """Train the cascade classifier."""
-    from src.train import train_cascade_classifier
-
-    train_cascade_classifier(
-        annotations_path=args.annotations,
-        output_dir=args.output_dir,
-        model_name=args.model_name,
-        embedding_dim=args.embedding_dim,
-        max_seq_length=args.max_seq_length,
-        batch_size=args.batch_size,
-        lr=args.lr,
-        num_epochs=args.num_epochs,
-        patience=args.patience,
-        min_samples=args.min_samples,
-        mlflow_experiment=args.mlflow_experiment,
-        eval_data_path=args.eval_data,
-        eval_top_k=args.eval_top_k,
-        eval_text_column=args.eval_text_column,
-    )
 
 
 def cmd_train_hierarchical(args: argparse.Namespace) -> None:
@@ -61,6 +38,7 @@ def cmd_train_hierarchical(args: argparse.Namespace) -> None:
         eval_data_path=args.eval_data,
         eval_top_k=args.eval_top_k,
         eval_text_column=args.eval_text_column,
+        eval_filter_columns=args.eval_filter_columns,
         resume_from=args.resume,
         encryption_key=args.encryption_key,
         max_level=args.max_level,
@@ -91,6 +69,7 @@ def cmd_fine_tune_hierarchical(args: argparse.Namespace) -> None:
         eval_data_path=args.eval_data,
         eval_top_k=args.eval_top_k,
         eval_text_column=args.eval_text_column,
+        eval_filter_columns=args.eval_filter_columns,
         encryption_key=args.encryption_key,
         max_level=args.max_level,
         num_workers=args.num_workers,
@@ -118,6 +97,7 @@ def cmd_train_basic(args: argparse.Namespace) -> None:
         eval_data_path=args.eval_data,
         eval_top_k=args.eval_top_k,
         eval_text_column=args.eval_text_column,
+        eval_filter_columns=args.eval_filter_columns,
         encryption_key=args.encryption_key,
     )
 
@@ -144,27 +124,6 @@ def cmd_predict_basic(args: argparse.Namespace) -> None:
             if "alternatives" in pred:
                 for i, alt in enumerate(pred["alternatives"], start=2):
                     print(f"  top {i}: {alt['code']} (conf: {alt['confidence']:.2f})")
-
-
-def cmd_predict(args: argparse.Namespace) -> None:
-    """Predict COICOP codes."""
-    from src.predict import COICOPPredictor
-
-    predictor = COICOPPredictor(args.model_path)
-
-    if args.file:
-        # File-based prediction
-        predictor.predict_file(
-            input_path=args.file,
-            output_path=args.output,
-            text_column=args.text_column,
-            batch_size=args.batch_size,
-        )
-    else:
-        # Text-based prediction
-        predictions = predictor.predict(args.texts)
-        for pred in predictions:
-            print(json.dumps(pred, ensure_ascii=False, indent=2))
 
 
 def cmd_predict_hierarchical(args: argparse.Namespace) -> None:
@@ -238,6 +197,7 @@ def cmd_train_multihead(args: argparse.Namespace) -> None:
         eval_data_path=args.eval_data,
         eval_top_k=args.eval_top_k,
         eval_text_column=args.eval_text_column,
+        eval_filter_columns=args.eval_filter_columns,
         encryption_key=args.encryption_key,
         num_workers=args.num_workers,
         pin_memory=args.pin_memory,
@@ -351,54 +311,6 @@ def cmd_evaluate_report(args: argparse.Namespace) -> None:
         )
 
 
-def cmd_evaluate(args: argparse.Namespace) -> None:
-    """Evaluate the classifier on a test set."""
-    import pandas as pd
-    from sklearn.metrics import accuracy_score, classification_report
-
-    from src.predict import COICOPPredictor
-
-    predictor = COICOPPredictor(args.model_path)
-
-    # Load test data
-    if args.test_file.endswith(".parquet"):
-        df = pd.read_parquet(args.test_file)
-    else:
-        df = pd.read_csv(args.test_file)
-
-    # Filter technical codes if needed
-    if args.exclude_technical:
-        df = df[~df[args.label_column].str.startswith(("98", "99"))]
-
-    logger.info(f"Evaluating on {len(df)} samples...")
-
-    # Predict
-    result_df = predictor.predict_dataframe(
-        df,
-        text_column=args.text_column,
-        batch_size=args.batch_size,
-    )
-
-    # Calculate metrics
-    y_true = result_df[args.label_column].tolist()
-    y_pred = result_df["predicted_code"].tolist()
-
-    # Exact match accuracy
-    accuracy = accuracy_score(y_true, y_pred)
-    print(f"\nExact Match Accuracy: {accuracy:.4f}")
-
-    # Level 1 accuracy
-    y_true_l1 = [c.split(".")[0].zfill(2) for c in y_true]
-    y_pred_l1 = result_df["predicted_level1"].tolist()
-    accuracy_l1 = accuracy_score(y_true_l1, y_pred_l1)
-    print(f"Level 1 Accuracy: {accuracy_l1:.4f}")
-
-    # Detailed classification report for level 1
-    if args.detailed:
-        print("\nLevel 1 Classification Report:")
-        print(classification_report(y_true_l1, y_pred_l1))
-
-
 def main() -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -407,94 +319,6 @@ def main() -> int:
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
-
-    # Train command
-    train_parser = subparsers.add_parser("train", help="Train the cascade classifier")
-    train_parser.add_argument(
-        "--annotations",
-        type=str,
-        default="data/annotations.parquet",
-        help="Path to annotations parquet file",
-    )
-    train_parser.add_argument(
-        "--output-dir",
-        type=str,
-        default="models",
-        help="Output directory for trained models",
-    )
-    train_parser.add_argument(
-        "--model-name",
-        type=str,
-        default="camembert-base",
-        help="HuggingFace model name for tokenizer",
-    )
-    train_parser.add_argument(
-        "--embedding-dim",
-        type=int,
-        default=128,
-        help="Text embedding dimension",
-    )
-    train_parser.add_argument(
-        "--max-seq-length",
-        type=int,
-        default=64,
-        help="Maximum sequence length",
-    )
-    train_parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=32,
-        help="Training batch size",
-    )
-    train_parser.add_argument(
-        "--lr",
-        type=float,
-        default=2e-5,
-        help="Learning rate",
-    )
-    train_parser.add_argument(
-        "--num-epochs",
-        type=int,
-        default=20,
-        help="Maximum number of epochs",
-    )
-    train_parser.add_argument(
-        "--patience",
-        type=int,
-        default=5,
-        help="Early stopping patience",
-    )
-    train_parser.add_argument(
-        "--min-samples",
-        type=int,
-        default=50,
-        help="Minimum samples for sub-classifiers",
-    )
-    train_parser.add_argument(
-        "--mlflow-experiment",
-        type=str,
-        default=None,
-        help="MLflow experiment name (optional)",
-    )
-    train_parser.add_argument(
-        "--eval-data",
-        type=str,
-        default=None,
-        help="Path to evaluation parquet for post-training top-k accuracy",
-    )
-    train_parser.add_argument(
-        "--eval-top-k",
-        type=int,
-        default=5,
-        help="Maximum K for top-k accuracy evaluation (default: 5)",
-    )
-    train_parser.add_argument(
-        "--eval-text-column",
-        type=str,
-        default="text",
-        help="Text column name in evaluation data (default: text)",
-    )
-    train_parser.set_defaults(func=cmd_train)
 
     # Train-hierarchical command
     train_hier_parser = subparsers.add_parser(
@@ -614,6 +438,14 @@ def main() -> int:
         type=str,
         default="text",
         help="Text column name in evaluation data (default: text)",
+    )
+    train_hier_parser.add_argument(
+        "--eval-filter-columns",
+        type=str,
+        nargs="+",
+        metavar="COL",
+        default=None,
+        help="Boolean columns in eval data to compute separate metrics for (True/False subsets)",
     )
     train_hier_parser.add_argument(
         "--resume",
@@ -737,6 +569,14 @@ def main() -> int:
         type=str,
         default="text",
         help="Text column name in evaluation data (default: text)",
+    )
+    ft_hier_parser.add_argument(
+        "--eval-filter-columns",
+        type=str,
+        nargs="+",
+        metavar="COL",
+        default=None,
+        help="Boolean columns in eval data to compute separate metrics for (True/False subsets)",
     )
     ft_hier_parser.add_argument(
         "--encryption-key",
@@ -868,6 +708,14 @@ def main() -> int:
         help="Text column name in evaluation data (default: product)",
     )
     train_basic_parser.add_argument(
+        "--eval-filter-columns",
+        type=str,
+        nargs="+",
+        metavar="COL",
+        default=None,
+        help="Boolean columns in eval data to compute separate metrics for (True/False subsets)",
+    )
+    train_basic_parser.add_argument(
         "--encryption-key",
         type=str,
         default=None,
@@ -922,45 +770,6 @@ def main() -> int:
         help="Text(s) to classify (if not using --file)",
     )
     predict_basic_parser.set_defaults(func=cmd_predict_basic)
-
-    # Predict command
-    predict_parser = subparsers.add_parser("predict", help="Predict COICOP codes")
-    predict_parser.add_argument(
-        "--model-path",
-        type=str,
-        default="models/model",
-        help="Path to saved model",
-    )
-    predict_parser.add_argument(
-        "--file",
-        type=str,
-        default=None,
-        help="Input file for batch prediction",
-    )
-    predict_parser.add_argument(
-        "--output",
-        type=str,
-        default="predictions.csv",
-        help="Output file for batch prediction",
-    )
-    predict_parser.add_argument(
-        "--text-column",
-        type=str,
-        default="product",
-        help="Name of text column in input file",
-    )
-    predict_parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=64,
-        help="Batch size for prediction",
-    )
-    predict_parser.add_argument(
-        "texts",
-        nargs="*",
-        help="Text(s) to classify (if not using --file)",
-    )
-    predict_parser.set_defaults(func=cmd_predict)
 
     # Predict-hierarchical command
     predict_hier_parser = subparsers.add_parser(
@@ -1162,6 +971,14 @@ def main() -> int:
         help="Text column name in evaluation data (default: text)",
     )
     train_mh_parser.add_argument(
+        "--eval-filter-columns",
+        type=str,
+        nargs="+",
+        metavar="COL",
+        default=None,
+        help="Boolean columns in eval data to compute separate metrics for (True/False subsets)",
+    )
+    train_mh_parser.add_argument(
         "--encryption-key",
         type=str,
         default=None,
@@ -1246,50 +1063,6 @@ def main() -> int:
         help="Text(s) to classify (if not using --file or --input)",
     )
     predict_mh_parser.set_defaults(func=cmd_predict_multihead)
-
-    # Evaluate command
-    eval_parser = subparsers.add_parser("evaluate", help="Evaluate the classifier")
-    eval_parser.add_argument(
-        "--model-path",
-        type=str,
-        default="models/model",
-        help="Path to saved model",
-    )
-    eval_parser.add_argument(
-        "--test-file",
-        type=str,
-        required=True,
-        help="Path to test file",
-    )
-    eval_parser.add_argument(
-        "--text-column",
-        type=str,
-        default="product",
-        help="Name of text column",
-    )
-    eval_parser.add_argument(
-        "--label-column",
-        type=str,
-        default="coicop",
-        help="Name of label column",
-    )
-    eval_parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=64,
-        help="Batch size for prediction",
-    )
-    eval_parser.add_argument(
-        "--exclude-technical",
-        action="store_true",
-        help="Exclude 98.x and 99.x codes",
-    )
-    eval_parser.add_argument(
-        "--detailed",
-        action="store_true",
-        help="Show detailed classification report",
-    )
-    eval_parser.set_defaults(func=cmd_evaluate)
 
     # Evaluate-report command
     eval_report_parser = subparsers.add_parser(
