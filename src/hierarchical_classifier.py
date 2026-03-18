@@ -21,10 +21,9 @@ from torchTextClassifiers.tokenizers import NGramTokenizer
 if TYPE_CHECKING:
     import pandas as pd
 
-logger = logging.getLogger(__name__)
+from .data_preparation import COICOP_LEVELS
 
-# COICOP hierarchy levels
-COICOP_LEVELS = ["level1", "level2", "level3", "level4", "level5"]
+logger = logging.getLogger(__name__)
 
 
 @dataclass

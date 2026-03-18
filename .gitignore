@@ -8,3 +8,21 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Training artifacts
+lightning_logs/
+mlruns/
+checkpoints/
+models/
+
+# Generated data
+/*.parquet
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Quarto
+index_files/
+.html
