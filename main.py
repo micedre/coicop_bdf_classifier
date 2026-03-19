@@ -241,6 +241,24 @@ def cmd_predict_multihead(args: argparse.Namespace) -> None:
                             print(f"    top {i}: {alt['code']} (conf: {alt['confidence']:.2f})")
 
 
+def cmd_classify_llm(args: argparse.Namespace) -> None:
+    """Classify a file into COICOP codes using an LLM."""
+    import asyncio
+
+    from src.llm_classifier import classify_llm
+
+    asyncio.run(
+        classify_llm(
+            input_path=args.input,
+            coicop_path=args.coicop,
+            output_path=args.output,
+            text_column=args.text_column,
+            batch_size=args.batch_size,
+            concurrency=args.concurrency,
+        )
+    )
+
+
 def cmd_serve(args: argparse.Namespace) -> None:
     """Start the FastAPI prediction server."""
     import uvicorn
@@ -1216,6 +1234,49 @@ def main() -> int:
         help="Parquet encryption key (hex, 32 chars). Implies --encrypt",
     )
     extract_ddc_parser.set_defaults(func=cmd_extract_ddc)
+
+    # Classify-llm command
+    classify_llm_parser = subparsers.add_parser(
+        "classify-llm",
+        help="Classify a file into COICOP codes using an OpenAI-compatible LLM",
+    )
+    classify_llm_parser.add_argument(
+        "--input",
+        type=str,
+        required=True,
+        help="Input file path (CSV or parquet, local or S3 URL)",
+    )
+    classify_llm_parser.add_argument(
+        "--coicop",
+        type=str,
+        default="data/coicop_et_codes_techniques.csv",
+        help="Path to COICOP taxonomy CSV (default: data/coicop_et_codes_techniques.csv)",
+    )
+    classify_llm_parser.add_argument(
+        "--output",
+        type=str,
+        default="predictions_llm.csv",
+        help="Output file path (CSV or parquet, local or S3; default: predictions_llm.csv)",
+    )
+    classify_llm_parser.add_argument(
+        "--text-column",
+        type=str,
+        default="product",
+        help="Column name containing text to classify (default: product)",
+    )
+    classify_llm_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=20,
+        help="Number of texts per LLM call (default: 20)",
+    )
+    classify_llm_parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=10,
+        help="Max concurrent API requests (default: 10)",
+    )
+    classify_llm_parser.set_defaults(func=cmd_classify_llm)
 
     # Serve command
     serve_parser = subparsers.add_parser(
