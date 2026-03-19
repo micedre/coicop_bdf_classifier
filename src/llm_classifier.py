@@ -38,7 +38,11 @@ def load_coicop_taxonomy(coicop_path: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     return level4_df, all_df
 
 
-def build_system_prompt(level4_df: pd.DataFrame, all_df: pd.DataFrame) -> str:
+def build_system_prompt(
+    level4_df: pd.DataFrame,
+    all_df: pd.DataFrame,
+    context_labels: list[str] | None = None,
+) -> str:
     """Build the fixed system prompt with all valid COICOP codes + hierarchy context."""
     code_to_libelle: dict[str, str] = dict(zip(all_df["Code"], all_df["Libelle"]))
 
@@ -63,10 +67,18 @@ def build_system_prompt(level4_df: pd.DataFrame, all_df: pd.DataFrame) -> str:
             lines.append(f"{code} - {libelle}")
 
     coicop_list = "\n".join(lines)
+    context_instruction = ""
+    if context_labels:
+        fields = ", ".join(context_labels)
+        context_instruction = (
+            f"\nChaque produit est fourni avec des informations contextuelles "
+            f"({fields}). Utilise ces informations pour affiner ta classification.\n"
+        )
     return (
         "Tu es un expert en classification COICOP. "
         "Classe chaque produit dans la catégorie COICOP la plus appropriée parmi la liste suivante:\n\n"
         f"{coicop_list}\n\n"
+        f"{context_instruction}"
         "Réponds UNIQUEMENT avec un tableau JSON de codes (dans le même ordre que les produits fournis). "
         'Exemple: ["01.1.1.1", "07.1.1.1", ...]'
     )
@@ -153,7 +165,7 @@ async def _classify_batch(
     client: openai.AsyncOpenAI,
     model: str,
     system_prompt: str,
-    texts: list[str],
+    texts: list[str] | list[dict],
     valid_codes: set[str],
     batch_id: int = 0,
 ) -> list[str | None]:
@@ -230,6 +242,7 @@ async def classify_llm(
     text_column: str = "product",
     batch_size: int = 20,
     concurrency: int = 10,
+    context_columns: dict[str, str] | None = None,
 ) -> None:
     """Classify texts from a file into COICOP codes using an LLM.
 
@@ -241,7 +254,11 @@ async def classify_llm(
     # Load taxonomy
     coicop_df, all_coicop_df = load_coicop_taxonomy(coicop_path)
     valid_codes = set(coicop_df["Code"].tolist())
-    system_prompt = build_system_prompt(coicop_df, all_coicop_df)
+    system_prompt = build_system_prompt(
+        coicop_df,
+        all_coicop_df,
+        context_labels=list(context_columns.keys()) if context_columns else None,
+    )
     code_to_libelle: dict[str, str] = dict(
         zip(all_coicop_df["Code"], all_coicop_df["Libelle"])
     )
@@ -283,7 +300,23 @@ async def classify_llm(
 
     # Build list of (index_in_df, text) so we can match results back
     records = list(df_input.itertuples(index=False))
-    texts = [str(getattr(r, text_column)) for r in records]
+    if context_columns:
+        missing = [col for col in context_columns.values() if col not in df_input.columns]
+        if missing:
+            raise ValueError(
+                f"Context columns not found in input: {missing}. "
+                f"Available: {list(df_input.columns)}"
+            )
+        texts: list[str] | list[dict] = []
+        for r in records:
+            entry: dict[str, str] = {"produit": str(getattr(r, text_column))}
+            for label, col_name in context_columns.items():
+                val = getattr(r, col_name, None)
+                if pd.notna(val):
+                    entry[label] = str(val)
+            texts.append(entry)
+    else:
+        texts = [str(getattr(r, text_column)) for r in records]
 
     # Split into batches
     batches: list[tuple[int, list[int]]] = []  # (batch_id, row indices)

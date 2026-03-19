@@ -271,6 +271,14 @@ def cmd_classify_llm(args: argparse.Namespace) -> None:
 
     from src.llm_classifier import classify_llm
 
+    context_columns = {}
+    if args.price_column:
+        context_columns["prix"] = args.price_column
+    if args.shop_column:
+        context_columns["enseigne"] = args.shop_column
+    if args.shop_category_column:
+        context_columns["categorie"] = args.shop_category_column
+
     asyncio.run(
         classify_llm(
             input_path=args.input,
@@ -279,6 +287,7 @@ def cmd_classify_llm(args: argparse.Namespace) -> None:
             text_column=args.text_column,
             batch_size=args.batch_size,
             concurrency=args.concurrency,
+            context_columns=context_columns or None,
         )
     )
 
@@ -1404,6 +1413,24 @@ def main() -> int:
         type=int,
         default=10,
         help="Max concurrent API requests (default: 10)",
+    )
+    classify_llm_parser.add_argument(
+        "--price-column",
+        type=str,
+        default=None,
+        help="Column name for price in euros (adds price context to LLM prompt)",
+    )
+    classify_llm_parser.add_argument(
+        "--shop-column",
+        type=str,
+        default=None,
+        help="Column name for shop/retailer name (adds shop context to LLM prompt)",
+    )
+    classify_llm_parser.add_argument(
+        "--shop-category-column",
+        type=str,
+        default=None,
+        help="Column name for shop category (adds category context to LLM prompt)",
     )
     classify_llm_parser.set_defaults(func=cmd_classify_llm)
 
