@@ -44,6 +44,7 @@ def cmd_train_hierarchical(args: argparse.Namespace) -> None:
         max_level=args.max_level,
         num_workers=args.num_workers,
         pin_memory=args.pin_memory,
+        tokenizer_name=args.tokenizer,
     )
 
 
@@ -92,6 +93,28 @@ def cmd_train_basic(args: argparse.Namespace) -> None:
         batch_size=args.batch_size,
         lr=args.lr,
         num_epochs=args.num_epochs,
+        patience=args.patience,
+        mlflow_experiment=args.mlflow_experiment,
+        eval_data_path=args.eval_data,
+        eval_top_k=args.eval_top_k,
+        eval_text_column=args.eval_text_column,
+        eval_filter_columns=args.eval_filter_columns,
+        encryption_key=args.encryption_key,
+        tokenizer_name=args.tokenizer,
+    )
+
+
+def cmd_fine_tune_basic(args: argparse.Namespace) -> None:
+    """Fine-tune a pre-trained basic classifier on new data."""
+    from src.train import fine_tune_basic_classifier
+
+    fine_tune_basic_classifier(
+        model_path=args.model,
+        data_path=args.data,
+        output_dir=args.output,
+        lr=args.lr,
+        num_epochs=args.num_epochs,
+        batch_size=args.batch_size,
         patience=args.patience,
         mlflow_experiment=args.mlflow_experiment,
         eval_data_path=args.eval_data,
@@ -201,6 +224,7 @@ def cmd_train_multihead(args: argparse.Namespace) -> None:
         encryption_key=args.encryption_key,
         num_workers=args.num_workers,
         pin_memory=args.pin_memory,
+        tokenizer_name=args.tokenizer,
     )
 
 
@@ -472,6 +496,12 @@ def main() -> int:
         help="Resume training from a previous checkpoint (uses output directory)",
     )
     train_hier_parser.add_argument(
+        "--tokenizer",
+        type=str,
+        default=None,
+        help="HuggingFace tokenizer name (e.g. 'camembert-base'). Default: n-gram tokenizer",
+    )
+    train_hier_parser.add_argument(
         "--encryption-key",
         type=str,
         default=None,
@@ -734,12 +764,105 @@ def main() -> int:
         help="Boolean columns in eval data to compute separate metrics for (True/False subsets)",
     )
     train_basic_parser.add_argument(
+        "--tokenizer",
+        type=str,
+        default=None,
+        help="HuggingFace tokenizer name (e.g. 'camembert-base'). Default: n-gram tokenizer",
+    )
+    train_basic_parser.add_argument(
         "--encryption-key",
         type=str,
         default=None,
         help="Parquet encryption key (hex, 32 chars) for reading/writing encrypted files",
     )
     train_basic_parser.set_defaults(func=cmd_train_basic)
+
+    # Fine-tune-basic command
+    ft_basic_parser = subparsers.add_parser(
+        "fine-tune-basic",
+        help="Fine-tune a pre-trained basic classifier on new data",
+    )
+    ft_basic_parser.add_argument(
+        "--model",
+        type=str,
+        required=True,
+        help="Path to the pre-trained basic model",
+    )
+    ft_basic_parser.add_argument(
+        "--data",
+        type=str,
+        required=True,
+        help="Path to new training data (parquet)",
+    )
+    ft_basic_parser.add_argument(
+        "--output",
+        type=str,
+        required=True,
+        help="Output directory for the fine-tuned model",
+    )
+    ft_basic_parser.add_argument(
+        "--lr",
+        type=float,
+        default=None,
+        help="Learning rate (default: original lr / 10)",
+    )
+    ft_basic_parser.add_argument(
+        "--num-epochs",
+        type=int,
+        default=None,
+        help="Number of epochs (default: 5)",
+    )
+    ft_basic_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=None,
+        help="Training batch size (default: same as original)",
+    )
+    ft_basic_parser.add_argument(
+        "--patience",
+        type=int,
+        default=None,
+        help="Early stopping patience (default: 3)",
+    )
+    ft_basic_parser.add_argument(
+        "--mlflow-experiment",
+        type=str,
+        default=None,
+        help="MLflow experiment name (optional)",
+    )
+    ft_basic_parser.add_argument(
+        "--eval-data",
+        type=str,
+        default=None,
+        help="Path to evaluation data for post-training top-k accuracy",
+    )
+    ft_basic_parser.add_argument(
+        "--eval-top-k",
+        type=int,
+        default=5,
+        help="Maximum K for top-k accuracy evaluation (default: 5)",
+    )
+    ft_basic_parser.add_argument(
+        "--eval-text-column",
+        type=str,
+        default="product",
+        help="Text column name in evaluation data (default: product)",
+    )
+    ft_basic_parser.add_argument(
+        "--eval-filter-columns",
+        type=str,
+        nargs="+",
+        metavar="COL",
+        default=None,
+        help="Boolean columns in eval data to compute separate metrics for (True/False subsets)",
+    )
+    ft_basic_parser.add_argument(
+        "--encryption-key",
+        type=str,
+        default=None,
+        help="Parquet encryption key (hex, 32 chars) for reading encrypted files",
+    )
+    ft_basic_parser.set_defaults(func=cmd_fine_tune_basic)
 
     # Predict-basic command
     predict_basic_parser = subparsers.add_parser(
@@ -995,6 +1118,12 @@ def main() -> int:
         metavar="COL",
         default=None,
         help="Boolean columns in eval data to compute separate metrics for (True/False subsets)",
+    )
+    train_mh_parser.add_argument(
+        "--tokenizer",
+        type=str,
+        default=None,
+        help="HuggingFace tokenizer name (e.g. 'camembert-base'). Default: n-gram tokenizer",
     )
     train_mh_parser.add_argument(
         "--encryption-key",

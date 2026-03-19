@@ -54,6 +54,8 @@ class MultiHeadConfig:
     ngram_min_n: int = 3
     ngram_max_n: int = 6
     ngram_num_tokens: int = 100_000
+    # Tokenizer override (None = use NGram, else HuggingFace pretrained name)
+    tokenizer_name: str | None = None
     # Backbone
     embedding_dim: int = 128
     max_seq_length: int = 64
@@ -392,6 +394,32 @@ class MultiHeadCOICOPClassifier:
         self.valid_children: dict[str, dict[str, list[int]]] = {}
         self._is_trained = False
 
+    def _init_tokenizer(self, texts: list[str]) -> None:
+        """Initialize tokenizer (HuggingFace pretrained or NGram)."""
+        if self.config.tokenizer_name is not None:
+            from torchTextClassifiers.tokenizers import HuggingFaceTokenizer
+
+            logger.info(f"Loading HuggingFace tokenizer: {self.config.tokenizer_name}...")
+            self.tokenizer = HuggingFaceTokenizer.load_from_pretrained(
+                self.config.tokenizer_name,
+                output_dim=self.config.max_seq_length,
+            )
+        else:
+            logger.info(
+                f"Training NGramTokenizer (n={self.config.ngram_min_n}-{self.config.ngram_max_n}, "
+                f"vocab_size={self.config.ngram_num_tokens})..."
+            )
+            self.tokenizer = NGramTokenizer(
+                min_count=1,
+                min_n=self.config.ngram_min_n,
+                max_n=self.config.ngram_max_n,
+                num_tokens=self.config.ngram_num_tokens,
+                len_word_ngrams=1,
+                training_text=texts,
+                output_dim=self.config.max_seq_length,
+            )
+        logger.info("Tokenizer ready.")
+
     def _build_valid_children(self) -> None:
         """Build parent->children index mapping for hierarchical masking."""
         for level_idx in range(1, len(self.level_names)):
@@ -486,20 +514,7 @@ class MultiHeadCOICOPClassifier:
 
         # Train tokenizer
         texts = df[text_column].tolist()
-        logger.info(
-            f"Training NGramTokenizer (n={self.config.ngram_min_n}-{self.config.ngram_max_n}, "
-            f"vocab_size={self.config.ngram_num_tokens})..."
-        )
-        self.tokenizer = NGramTokenizer(
-            min_count=1,
-            min_n=self.config.ngram_min_n,
-            max_n=self.config.ngram_max_n,
-            num_tokens=self.config.ngram_num_tokens,
-            len_word_ngrams=1,
-            training_text=texts,
-            output_dim=self.config.max_seq_length,
-        )
-        logger.info("Tokenizer training complete.")
+        self._init_tokenizer(texts)
 
         # Build per-level label arrays (use -100 for missing)
         level_labels: dict[str, np.ndarray] = {}
@@ -562,7 +577,7 @@ class MultiHeadCOICOPClassifier:
         # Build model
         self.model = MultiHeadClassificationModel(
             vocab_size=self.tokenizer.vocab_size,
-            padding_idx=self.tokenizer.pad_token_id,
+            padding_idx=self.tokenizer.padding_idx,
             embedding_dim=self.config.embedding_dim,
             max_seq_length=self.config.max_seq_length,
             n_attention_layers=self.config.n_attention_layers,
@@ -842,6 +857,7 @@ class MultiHeadCOICOPClassifier:
                 "ngram_min_n": self.config.ngram_min_n,
                 "ngram_max_n": self.config.ngram_max_n,
                 "ngram_num_tokens": self.config.ngram_num_tokens,
+                "tokenizer_name": self.config.tokenizer_name,
                 "embedding_dim": self.config.embedding_dim,
                 "max_seq_length": self.config.max_seq_length,
                 "n_attention_layers": self.config.n_attention_layers,

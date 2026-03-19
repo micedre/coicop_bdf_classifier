@@ -37,6 +37,9 @@ class HierarchicalConfig:
     ngram_min_count: int = 1  # Minimum count for n-gram to be included
     ngram_len_word_ngrams: int = 1  # Length of word n-grams (1 = unigrams)
 
+    # Tokenizer override (None = use NGram, else HuggingFace pretrained name)
+    tokenizer_name: str | None = None
+
     # Model settings
     embedding_dim: int = 128
     max_seq_length: int = 64
@@ -118,25 +121,34 @@ class HierarchicalCOICOPClassifier:
         }
 
     def _init_tokenizer(self, texts: list[str]) -> None:
-        """Train NGramTokenizer on the full corpus.
+        """Initialize tokenizer (HuggingFace pretrained or NGram).
 
         Args:
-            texts: All training texts for vocabulary building.
+            texts: All training texts for vocabulary building (used by NGram only).
         """
-        logger.info(
-            f"Training NGramTokenizer (n={self.config.ngram_min_n}-{self.config.ngram_max_n}, "
-            f"vocab_size={self.config.ngram_num_tokens})..."
-        )
-        self.tokenizer = NGramTokenizer(
-            min_count=self.config.ngram_min_count,
-            min_n=self.config.ngram_min_n,
-            max_n=self.config.ngram_max_n,
-            num_tokens=self.config.ngram_num_tokens,
-            len_word_ngrams=self.config.ngram_len_word_ngrams,
-            training_text=texts,
-            output_dim=self.config.max_seq_length,
-        )
-        logger.info("Tokenizer training complete.")
+        if self.config.tokenizer_name is not None:
+            from torchTextClassifiers.tokenizers import HuggingFaceTokenizer
+
+            logger.info(f"Loading HuggingFace tokenizer: {self.config.tokenizer_name}...")
+            self.tokenizer = HuggingFaceTokenizer.load_from_pretrained(
+                self.config.tokenizer_name,
+                output_dim=self.config.max_seq_length,
+            )
+        else:
+            logger.info(
+                f"Training NGramTokenizer (n={self.config.ngram_min_n}-{self.config.ngram_max_n}, "
+                f"vocab_size={self.config.ngram_num_tokens})..."
+            )
+            self.tokenizer = NGramTokenizer(
+                min_count=self.config.ngram_min_count,
+                min_n=self.config.ngram_min_n,
+                max_n=self.config.ngram_max_n,
+                num_tokens=self.config.ngram_num_tokens,
+                len_word_ngrams=self.config.ngram_len_word_ngrams,
+                training_text=texts,
+                output_dim=self.config.max_seq_length,
+            )
+        logger.info("Tokenizer ready.")
 
     def _discretize_confidence(self, confidence: np.ndarray) -> np.ndarray:
         """Convert continuous confidence to discrete buckets.
@@ -1155,6 +1167,7 @@ class HierarchicalCOICOPClassifier:
                 "ngram_num_tokens": self.config.ngram_num_tokens,
                 "ngram_min_count": self.config.ngram_min_count,
                 "ngram_len_word_ngrams": self.config.ngram_len_word_ngrams,
+                "tokenizer_name": self.config.tokenizer_name,
                 "embedding_dim": self.config.embedding_dim,
                 "max_seq_length": self.config.max_seq_length,
                 "batch_size": self.config.batch_size,

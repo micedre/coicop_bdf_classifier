@@ -33,6 +33,9 @@ class BasicConfig:
     ngram_min_count: int = 1
     ngram_len_word_ngrams: int = 1
 
+    # Tokenizer override (None = use NGram, else HuggingFace pretrained name)
+    tokenizer_name: str | None = None
+
     # Model settings
     embedding_dim: int = 128
     max_seq_length: int = 64
@@ -55,28 +58,37 @@ class BasicCOICOPClassifier:
     def __init__(self, config: BasicConfig | None = None):
         self.config = config or BasicConfig()
         self.classifier: torchTextClassifiers | None = None
-        self.tokenizer: NGramTokenizer | None = None
+        self.tokenizer: NGramTokenizer | None = None  # or HuggingFaceTokenizer
         self.label_names: list[str] = []
         self.label_to_idx: dict[str, int] = {}
         self.idx_to_label: dict[int, str] = {}
         self._is_trained = False
 
     def _init_tokenizer(self, texts: list[str]) -> None:
-        """Train NGramTokenizer on the corpus."""
-        logger.info(
-            f"Training NGramTokenizer (n={self.config.ngram_min_n}-{self.config.ngram_max_n}, "
-            f"vocab_size={self.config.ngram_num_tokens})..."
-        )
-        self.tokenizer = NGramTokenizer(
-            min_count=self.config.ngram_min_count,
-            min_n=self.config.ngram_min_n,
-            max_n=self.config.ngram_max_n,
-            num_tokens=self.config.ngram_num_tokens,
-            len_word_ngrams=self.config.ngram_len_word_ngrams,
-            training_text=texts,
-            output_dim=self.config.max_seq_length,
-        )
-        logger.info("Tokenizer training complete.")
+        """Initialize tokenizer (HuggingFace pretrained or NGram)."""
+        if self.config.tokenizer_name is not None:
+            from torchTextClassifiers.tokenizers import HuggingFaceTokenizer
+
+            logger.info(f"Loading HuggingFace tokenizer: {self.config.tokenizer_name}...")
+            self.tokenizer = HuggingFaceTokenizer.load_from_pretrained(
+                self.config.tokenizer_name,
+                output_dim=self.config.max_seq_length,
+            )
+        else:
+            logger.info(
+                f"Training NGramTokenizer (n={self.config.ngram_min_n}-{self.config.ngram_max_n}, "
+                f"vocab_size={self.config.ngram_num_tokens})..."
+            )
+            self.tokenizer = NGramTokenizer(
+                min_count=self.config.ngram_min_count,
+                min_n=self.config.ngram_min_n,
+                max_n=self.config.ngram_max_n,
+                num_tokens=self.config.ngram_num_tokens,
+                len_word_ngrams=self.config.ngram_len_word_ngrams,
+                training_text=texts,
+                output_dim=self.config.max_seq_length,
+            )
+        logger.info("Tokenizer ready.")
 
     def train(
         self,
@@ -184,6 +196,108 @@ class BasicCOICOPClassifier:
         logger.info(f"Training complete: {num_classes} classes")
         return metrics
 
+    def fine_tune(
+        self,
+        df: pd.DataFrame,
+        text_column: str = "product",
+        code_column: str = "code8",
+        save_dir: str | None = None,
+        trainer_params: dict | None = None,
+        lr: float | None = None,
+        num_epochs: int | None = None,
+        batch_size: int | None = None,
+        patience: int | None = None,
+    ) -> dict:
+        """Fine-tune a trained basic classifier on new data.
+
+        Only updates weights for labels already known to the model.
+
+        Args:
+            df: DataFrame with text and code columns (already preprocessed).
+            text_column: Name of text column.
+            code_column: Name of COICOP code column.
+            save_dir: Directory to save checkpoints during training.
+            trainer_params: Optional trainer params (e.g. MLflow logger).
+            lr: Learning rate override (default: original lr / 10).
+            num_epochs: Epochs override (default: 5).
+            batch_size: Batch size override (default: same as original).
+            patience: Early stopping patience override (default: 3).
+
+        Returns:
+            Dictionary with fine-tuning metrics.
+        """
+        from sklearn.model_selection import train_test_split
+
+        if not self._is_trained:
+            raise RuntimeError("Classifier must be trained before fine-tuning.")
+
+        # Filter to known labels only
+        known_labels = set(self.label_to_idx)
+        mask = df[code_column].isin(known_labels)
+        n_dropped = len(df) - mask.sum()
+        if n_dropped > 0:
+            logger.warning(f"Dropping {n_dropped} samples with unknown labels")
+        df = df[mask].copy()
+
+        if len(df) == 0:
+            raise ValueError("No samples with known labels remain after filtering.")
+
+        # Resolve fine-tuning defaults
+        ft_lr = lr or self.config.lr / 10
+        ft_epochs = num_epochs or 5
+        ft_batch_size = batch_size or self.config.batch_size
+        ft_patience = patience or 3
+
+        logger.info(
+            f"Fine-tuning: {len(df)} samples, lr={ft_lr}, "
+            f"epochs={ft_epochs}, batch_size={ft_batch_size}"
+        )
+
+        # Prepare data
+        texts = df[text_column].tolist()
+        X = np.array(texts)
+        y = np.array([self.label_to_idx[label] for label in df[code_column]])
+
+        # Stratified train/val split
+        indices = np.arange(len(texts))
+        train_idx, val_idx = train_test_split(
+            indices, test_size=0.2, random_state=42, stratify=y,
+        )
+        X_train, X_val = X[train_idx], X[val_idx]
+        y_train, y_val = y[train_idx], y[val_idx]
+
+        logger.info(f"Train: {len(train_idx)}, Val: {len(val_idx)}")
+
+        # Training config with FT params
+        training_config = TrainingConfig(
+            num_epochs=ft_epochs,
+            batch_size=ft_batch_size,
+            lr=ft_lr,
+            patience_early_stopping=ft_patience,
+            save_path=save_dir or "basic_model_ft",
+            **({"trainer_params": trainer_params} if trainer_params else {}),
+        )
+
+        # Fine-tune existing classifier weights
+        self.classifier.train(
+            X_train=X_train,
+            y_train=y_train,
+            X_val=X_val,
+            y_val=y_val,
+            training_config=training_config,
+            verbose=True,
+        )
+
+        metrics = {
+            "train_samples": len(train_idx),
+            "val_samples": len(val_idx),
+            "total_samples": len(df),
+            "dropped_samples": n_dropped,
+        }
+
+        logger.info("Fine-tuning complete.")
+        return metrics
+
     def predict(self, texts: list[str], top_k: int = 1) -> dict:
         """Predict COICOP codes for input texts.
 
@@ -242,6 +356,7 @@ class BasicCOICOPClassifier:
                 "ngram_num_tokens": self.config.ngram_num_tokens,
                 "ngram_min_count": self.config.ngram_min_count,
                 "ngram_len_word_ngrams": self.config.ngram_len_word_ngrams,
+                "tokenizer_name": self.config.tokenizer_name,
                 "embedding_dim": self.config.embedding_dim,
                 "max_seq_length": self.config.max_seq_length,
                 "batch_size": self.config.batch_size,

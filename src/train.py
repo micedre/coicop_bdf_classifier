@@ -193,6 +193,7 @@ def train_hierarchical_classifier(
     max_level: int = 5,
     num_workers: int = 0,
     pin_memory: bool = True,
+    tokenizer_name: str | None = None,
 ) -> HierarchicalCOICOPClassifier:
     """Train the hierarchical multi-level COICOP classifier.
 
@@ -281,6 +282,8 @@ def train_hierarchical_classifier(
             "unique_level1": unique_level1,
             "data_path": annotations_path,
         })
+        if tokenizer_name:
+            mlflow.log_param("tokenizer_name", tokenizer_name)
         if eval_data_path:
             mlflow.log_param("eval_data_path", eval_data_path)
 
@@ -308,6 +311,7 @@ def train_hierarchical_classifier(
         max_level=max_level,
         num_workers=num_workers,
         pin_memory=pin_memory,
+        tokenizer_name=tokenizer_name,
     )
 
     # Create and train classifier
@@ -510,6 +514,7 @@ def train_basic_classifier(
     eval_text_column: str = "product",
     eval_filter_columns: list[str] | None = None,
     encryption_key: str | None = None,
+    tokenizer_name: str | None = None,
 ) -> BasicCOICOPClassifier:
     """Train the basic flat COICOP classifier.
 
@@ -569,6 +574,8 @@ def train_basic_classifier(
             "unique_codes": unique_codes,
             "data_path": data_path,
         })
+        if tokenizer_name:
+            mlflow.log_param("tokenizer_name", tokenizer_name)
         if eval_data_path:
             mlflow.log_param("eval_data_path", eval_data_path)
 
@@ -592,6 +599,7 @@ def train_basic_classifier(
         lr=lr,
         num_epochs=num_epochs,
         patience=patience,
+        tokenizer_name=tokenizer_name,
     )
     classifier = BasicCOICOPClassifier(config=config)
 
@@ -652,6 +660,7 @@ def train_multihead_classifier(
     encryption_key: str | None = None,
     num_workers: int = 0,
     pin_memory: bool = True,
+    tokenizer_name: str | None = None,
 ) -> MultiHeadCOICOPClassifier:
     """Train the multi-head COICOP classifier with shared backbone.
 
@@ -727,6 +736,8 @@ def train_multihead_classifier(
         })
         if loss_weights is not None:
             mlflow.log_param("loss_weights", str(loss_weights))
+        if tokenizer_name:
+            mlflow.log_param("tokenizer_name", tokenizer_name)
         if eval_data_path:
             mlflow.log_param("eval_data_path", eval_data_path)
 
@@ -757,6 +768,7 @@ def train_multihead_classifier(
         min_samples_per_level=min_samples,
         num_workers=num_workers,
         pin_memory=pin_memory,
+        tokenizer_name=tokenizer_name,
     )
 
     # Create and train classifier
@@ -789,6 +801,128 @@ def train_multihead_classifier(
     if mlflow_experiment:
         _finalize_mlflow_run(
             classifier, model_path, "multihead", "src/mlflow_model_multihead.py",
+            eval_data_path, eval_text_column, eval_top_k, eval_filter_columns,
+        )
+
+    return classifier
+
+
+def fine_tune_basic_classifier(
+    model_path: str,
+    data_path: str,
+    output_dir: str,
+    lr: float | None = None,
+    num_epochs: int | None = None,
+    batch_size: int | None = None,
+    patience: int | None = None,
+    code_column: str = "code8",
+    mlflow_experiment: str | None = None,
+    eval_data_path: str | None = None,
+    eval_top_k: int = 5,
+    eval_text_column: str = "product",
+    eval_filter_columns: list[str] | None = None,
+    encryption_key: str | None = None,
+) -> BasicCOICOPClassifier:
+    """Fine-tune a pre-trained basic classifier on new data.
+
+    Args:
+        model_path: Path to the pre-trained basic model directory.
+        data_path: Path to new training data (parquet).
+        output_dir: Directory to save the fine-tuned model.
+        lr: Learning rate override (default: original lr / 10).
+        num_epochs: Number of epochs override (default: 5).
+        batch_size: Batch size override.
+        patience: Early stopping patience override (default: 3).
+        code_column: Name of the COICOP code column.
+        mlflow_experiment: MLflow experiment name (optional).
+        eval_data_path: Path to evaluation data for post-training metrics.
+        eval_top_k: Maximum K for top-k accuracy evaluation.
+        eval_text_column: Text column name in evaluation data.
+        eval_filter_columns: Boolean columns to compute separate metrics for.
+        encryption_key: Parquet encryption key.
+
+    Returns:
+        Fine-tuned BasicCOICOPClassifier.
+    """
+    from .data_preparation import read_parquet
+
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    # Load pre-trained model
+    logger.info(f"Loading pre-trained basic model from {model_path}...")
+    classifier = BasicCOICOPClassifier.load(model_path)
+
+    # Load new data
+    logger.info(f"Loading training data from {data_path}...")
+    df = read_parquet(data_path, encryption_key)
+    logger.info(f"Loaded {len(df)} samples")
+
+    unique_codes = df[code_column].nunique()
+    logger.info(f"Unique codes: {unique_codes}")
+
+    # Initialize MLflow if experiment name provided
+    trainer_params = None
+    if mlflow_experiment:
+        mlflow.set_experiment(mlflow_experiment)
+        mlflow.start_run()
+        params = {
+            "task": "fine-tuning",
+            "classifier_type": "basic",
+            "base_model_path": model_path,
+            "num_samples": len(df),
+            "unique_codes": unique_codes,
+            "data_path": data_path,
+        }
+        if lr is not None:
+            params["lr"] = lr
+        if num_epochs is not None:
+            params["num_epochs"] = num_epochs
+        if batch_size is not None:
+            params["batch_size"] = batch_size
+        if patience is not None:
+            params["patience"] = patience
+        mlflow.log_params(params)
+        if eval_data_path:
+            mlflow.log_param("eval_data_path", eval_data_path)
+
+        from .mlflow_utils import make_trainer_params
+
+        run_id = mlflow.active_run().info.run_id
+        trainer_params = make_trainer_params(
+            experiment_name=mlflow_experiment,
+            run_id=run_id,
+            tracking_uri=mlflow.get_tracking_uri(),
+        )
+
+    # Fine-tune
+    logger.info("Starting fine-tuning...")
+    metrics = classifier.fine_tune(
+        df=df,
+        text_column="product",
+        code_column=code_column,
+        save_dir=str(output_path / "checkpoints"),
+        trainer_params=trainer_params,
+        lr=lr,
+        num_epochs=num_epochs,
+        batch_size=batch_size,
+        patience=patience,
+    )
+
+    # Save the fine-tuned model
+    ft_model_path = output_path / "basic_model"
+    classifier.save(ft_model_path)
+    logger.info(f"Fine-tuned model saved to {ft_model_path}")
+
+    if mlflow_experiment:
+        mlflow.log_metrics({
+            "ft_train_samples": metrics["train_samples"],
+            "ft_val_samples": metrics["val_samples"],
+            "ft_dropped_samples": metrics["dropped_samples"],
+        })
+
+        _finalize_mlflow_run(
+            classifier, ft_model_path, "basic", "src/mlflow_model_basic.py",
             eval_data_path, eval_text_column, eval_top_k, eval_filter_columns,
         )
 
