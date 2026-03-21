@@ -312,9 +312,16 @@ class BasicCOICOPPredictor:
         texts = df[text_column].tolist()
         predictions = self.predict_batch(texts, batch_size=batch_size, top_k=top_k)
 
+        from .data_preparation import extract_levels
+
         result_df = df.copy()
         result_df["predicted_code"] = [p["code"] for p in predictions]
         result_df["confidence"] = [p["confidence"] for p in predictions]
+
+        predicted_codes = result_df["predicted_code"].tolist()
+        levels_data = [extract_levels(code) for code in predicted_codes]
+        for level_key in ["level1", "level2", "level3", "level4", "level5"]:
+            result_df[f"predicted_{level_key}"] = [d.get(level_key, "") for d in levels_data]
 
         if top_k > 1:
             for k in range(1, top_k):
@@ -331,6 +338,10 @@ class BasicCOICOPPredictor:
                     else 0.0
                     for p in predictions
                 ]
+                top_codes = result_df[f"predicted_code_top{rank}"].tolist()
+                top_levels_data = [extract_levels(code) if code else {} for code in top_codes]
+                for level_key in ["level1", "level2", "level3", "level4", "level5"]:
+                    result_df[f"predicted_{level_key}_top{rank}"] = [d.get(level_key, "") for d in top_levels_data]
 
         return result_df
 
