@@ -42,6 +42,30 @@ def ensure_true_labels(df: pd.DataFrame, code_column: str = 'code') -> pd.DataFr
     return pd.concat([df, levels], axis=1)
 
 
+def ensure_predicted_levels(df: pd.DataFrame) -> pd.DataFrame:
+    """Derive predicted_level{N} columns from predicted_code if absent.
+
+    Basic-classifier prediction files store the full code in `predicted_code`
+    instead of per-level columns.  This converts them to the standard format
+    expected by detect_levels / topk_hit.
+    """
+    if "predicted_level1" in df.columns or "predicted_code" not in df.columns:
+        return df
+    levels_data = [extract_levels(code) for code in df["predicted_code"]]
+    for level_key in ["level1", "level2", "level3", "level4", "level5"]:
+        df[f"predicted_{level_key}"] = [d.get(level_key, "") for d in levels_data]
+    rank = 2
+    while f"predicted_code_top{rank}" in df.columns:
+        top_levels_data = [
+            extract_levels(code) if code else {}
+            for code in df[f"predicted_code_top{rank}"]
+        ]
+        for level_key in ["level1", "level2", "level3", "level4", "level5"]:
+            df[f"predicted_{level_key}_top{rank}"] = [d.get(level_key, "") for d in top_levels_data]
+        rank += 1
+    return df
+
+
 def topk_hit(df: pd.DataFrame, level: int, k: int) -> pd.Series:
     """Boolean Series: true if the true label appears in the top-k predictions.
 
@@ -139,6 +163,7 @@ def main() -> None:
 
     df = pd.read_parquet(args.file)
     df = ensure_true_labels(df, args.code_column)
+    df = ensure_predicted_levels(df)
 
     # ── Apply boolean filters ─────────────────────────────────────────
     if args.filter:
