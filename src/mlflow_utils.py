@@ -45,7 +45,7 @@ def make_trainer_params(
         tracking_uri=tracking_uri,
         prefix=prefix,
     )
-    return {"logger": logger}
+    return {"logger": logger, "log_every_n_steps": 50}
 
 
 class COICOPPyfuncWrapper(mlflow.pyfunc.PythonModel):
