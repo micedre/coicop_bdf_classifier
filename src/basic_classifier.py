@@ -164,13 +164,19 @@ class BasicCOICOPClassifier:
         )
 
         # Training config
+        # Ensure log_every_n_steps is not 1 (library default) to avoid
+        # excessive MLflow HTTP calls when logging is enabled
+        merged_trainer_params = {"log_every_n_steps": 50}
+        if trainer_params:
+            merged_trainer_params.update(trainer_params)
+
         training_config = TrainingConfig(
             num_epochs=self.config.num_epochs,
             batch_size=self.config.batch_size,
             lr=self.config.lr,
             patience_early_stopping=self.config.patience,
             save_path=save_dir or "basic_model",
-            **({"trainer_params": trainer_params} if trainer_params else {}),
+            trainer_params=merged_trainer_params,
         )
 
         # Train
@@ -269,13 +275,17 @@ class BasicCOICOPClassifier:
         logger.info(f"Train: {len(train_idx)}, Val: {len(val_idx)}")
 
         # Training config with FT params
+        ft_merged_trainer_params = {"log_every_n_steps": 50}
+        if trainer_params:
+            ft_merged_trainer_params.update(trainer_params)
+
         training_config = TrainingConfig(
             num_epochs=ft_epochs,
             batch_size=ft_batch_size,
             lr=ft_lr,
             patience_early_stopping=ft_patience,
             save_path=save_dir or "basic_model_ft",
-            **({"trainer_params": trainer_params} if trainer_params else {}),
+            trainer_params=ft_merged_trainer_params,
         )
 
         # Fine-tune existing classifier weights

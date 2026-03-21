@@ -600,12 +600,12 @@ class HierarchicalCOICOPClassifier:
             logger.info(f"  Train: {len(train_idx)}, Val: {len(val_idx)}")
 
             # Build per-level trainer_params with MLflow logger if available
-            level_trainer_params = None
+            level_trainer_params = {"log_every_n_steps": 50}
             if mlflow_run_info:
                 from .mlflow_utils import make_trainer_params
 
-                level_trainer_params = make_trainer_params(
-                    **mlflow_run_info, prefix=level_name
+                level_trainer_params.update(
+                    make_trainer_params(**mlflow_run_info, prefix=level_name)
                 )
 
             # Training config
@@ -621,7 +621,7 @@ class HierarchicalCOICOPClassifier:
                 save_path=save_path or f"hierarchical_{level_name}",
                 num_workers=self.config.num_workers,
                 dataloader_params={"pin_memory": self.config.pin_memory},
-                **({"trainer_params": level_trainer_params} if level_trainer_params else {}),
+                trainer_params=level_trainer_params,
             )
 
             # Train
@@ -870,12 +870,12 @@ class HierarchicalCOICOPClassifier:
                 logger.info(f"  Train: {len(train_idx)}, Val: {len(val_idx)}")
 
                 # Build per-level trainer_params with MLflow logger if available
-                level_trainer_params = None
+                level_trainer_params = {"log_every_n_steps": 50}
                 if mlflow_run_info:
                     from .mlflow_utils import make_trainer_params
 
-                    level_trainer_params = make_trainer_params(
-                        **mlflow_run_info, prefix=level_name
+                    level_trainer_params.update(
+                        make_trainer_params(**mlflow_run_info, prefix=level_name)
                     )
 
                 save_path = None
@@ -890,11 +890,7 @@ class HierarchicalCOICOPClassifier:
                     save_path=save_path or f"finetune_{level_name}",
                     num_workers=self.config.num_workers,
                     dataloader_params={"pin_memory": self.config.pin_memory},
-                    **(
-                        {"trainer_params": level_trainer_params}
-                        if level_trainer_params
-                        else {}
-                    ),
+                    trainer_params=level_trainer_params,
                 )
 
                 classifier.train(
