@@ -39,6 +39,7 @@ def cmd_train_hierarchical(args: argparse.Namespace) -> None:
         eval_top_k=args.eval_top_k,
         eval_text_column=args.eval_text_column,
         eval_filter_columns=args.eval_filter_columns,
+        eval_code_column=args.eval_code_column,
         resume_from=args.resume,
         encryption_key=args.encryption_key,
         max_level=args.max_level,
@@ -71,6 +72,7 @@ def cmd_fine_tune_hierarchical(args: argparse.Namespace) -> None:
         eval_top_k=args.eval_top_k,
         eval_text_column=args.eval_text_column,
         eval_filter_columns=args.eval_filter_columns,
+        eval_code_column=args.eval_code_column,
         encryption_key=args.encryption_key,
         max_level=args.max_level,
         num_workers=args.num_workers,
@@ -99,6 +101,7 @@ def cmd_train_basic(args: argparse.Namespace) -> None:
         eval_top_k=args.eval_top_k,
         eval_text_column=args.eval_text_column,
         eval_filter_columns=args.eval_filter_columns,
+        eval_code_column=args.eval_code_column,
         encryption_key=args.encryption_key,
         tokenizer_name=args.tokenizer,
     )
@@ -121,6 +124,7 @@ def cmd_fine_tune_basic(args: argparse.Namespace) -> None:
         eval_top_k=args.eval_top_k,
         eval_text_column=args.eval_text_column,
         eval_filter_columns=args.eval_filter_columns,
+        eval_code_column=args.eval_code_column,
         encryption_key=args.encryption_key,
     )
 
@@ -221,6 +225,7 @@ def cmd_train_multihead(args: argparse.Namespace) -> None:
         eval_top_k=args.eval_top_k,
         eval_text_column=args.eval_text_column,
         eval_filter_columns=args.eval_filter_columns,
+        eval_code_column=args.eval_code_column,
         encryption_key=args.encryption_key,
         num_workers=args.num_workers,
         pin_memory=args.pin_memory,
@@ -499,6 +504,12 @@ def main() -> int:
         help="Boolean columns in eval data to compute separate metrics for (True/False subsets)",
     )
     train_hier_parser.add_argument(
+        "--eval-code-column",
+        type=str,
+        default="code",
+        help="Name of the true code column in eval data (default: code)",
+    )
+    train_hier_parser.add_argument(
         "--resume",
         action="store_true",
         default=False,
@@ -634,6 +645,12 @@ def main() -> int:
         metavar="COL",
         default=None,
         help="Boolean columns in eval data to compute separate metrics for (True/False subsets)",
+    )
+    ft_hier_parser.add_argument(
+        "--eval-code-column",
+        type=str,
+        default="code",
+        help="Name of the true code column in eval data (default: code)",
     )
     ft_hier_parser.add_argument(
         "--encryption-key",
@@ -773,6 +790,12 @@ def main() -> int:
         help="Boolean columns in eval data to compute separate metrics for (True/False subsets)",
     )
     train_basic_parser.add_argument(
+        "--eval-code-column",
+        type=str,
+        default="code",
+        help="Name of the true code column in eval data (default: code)",
+    )
+    train_basic_parser.add_argument(
         "--tokenizer",
         type=str,
         default=None,
@@ -864,6 +887,12 @@ def main() -> int:
         metavar="COL",
         default=None,
         help="Boolean columns in eval data to compute separate metrics for (True/False subsets)",
+    )
+    ft_basic_parser.add_argument(
+        "--eval-code-column",
+        type=str,
+        default="code",
+        help="Name of the true code column in eval data (default: code)",
     )
     ft_basic_parser.add_argument(
         "--encryption-key",
@@ -1127,6 +1156,12 @@ def main() -> int:
         metavar="COL",
         default=None,
         help="Boolean columns in eval data to compute separate metrics for (True/False subsets)",
+    )
+    train_mh_parser.add_argument(
+        "--eval-code-column",
+        type=str,
+        default="code",
+        help="Name of the true code column in eval data (default: code)",
     )
     train_mh_parser.add_argument(
         "--tokenizer",
