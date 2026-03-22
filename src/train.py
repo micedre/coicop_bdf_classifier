@@ -199,6 +199,7 @@ def train_hierarchical_classifier(
     eval_filter_columns: list[str] | None = None,
     eval_code_column: str = "code",
     preprocess: bool = True,
+    code_column: str = "code",
     resume_from: bool = False,
     encryption_key: str | None = None,
     max_level: int = 5,
@@ -245,11 +246,11 @@ def train_hierarchical_classifier(
 
     # Load data
     logger.info(f"Loading annotations from {annotations_path}...")
-    df = load_annotations(annotations_path, exclude_technical=True, encryption_key=encryption_key, preprocess=preprocess)
+    df = load_annotations(annotations_path, exclude_technical=True, encryption_key=encryption_key, preprocess=preprocess, code_column=code_column)
     logger.info(f"Loaded {len(df)} samples (excluding 98.x and 99.x codes)")
 
     # Log data statistics
-    unique_codes = df["code"].nunique()
+    unique_codes = df[code_column].nunique()
     unique_level1 = df["level1"].nunique()
     logger.info(f"Unique codes: {unique_codes}")
     logger.info(f"Level 1 categories: {unique_level1}")
@@ -332,7 +333,7 @@ def train_hierarchical_classifier(
     metrics = classifier.train(
         df=df,
         text_column="text",
-        code_column="code",
+        code_column=code_column,
         save_dir=str(output_path / "checkpoints"),
         mlflow_run_info=mlflow_run_info,
         resume_from=resume_path,
@@ -379,6 +380,7 @@ def fine_tune_hierarchical_classifier(
     eval_filter_columns: list[str] | None = None,
     eval_code_column: str = "code",
     preprocess: bool = True,
+    code_column: str = "code",
     encryption_key: str | None = None,
     max_level: int | None = None,
     num_workers: int | None = None,
@@ -424,11 +426,11 @@ def fine_tune_hierarchical_classifier(
 
     # Load new data
     logger.info(f"Loading new training data from {annotations_path}...")
-    df = load_annotations(annotations_path, exclude_technical=True, encryption_key=encryption_key, preprocess=preprocess)
+    df = load_annotations(annotations_path, exclude_technical=True, encryption_key=encryption_key, preprocess=preprocess, code_column=code_column)
     logger.info(f"Loaded {len(df)} samples (excluding 98.x and 99.x codes)")
 
     # Log data statistics
-    unique_codes = df["code"].nunique()
+    unique_codes = df[code_column].nunique()
     logger.info(f"Unique codes: {unique_codes}")
 
     # Initialize MLflow if experiment name provided
@@ -472,7 +474,7 @@ def fine_tune_hierarchical_classifier(
     metrics = classifier.fine_tune(
         df=df,
         text_column="text",
-        code_column="code",
+        code_column=code_column,
         save_dir=str(output_path / "checkpoints"),
         mlflow_run_info=mlflow_run_info,
         levels=levels,
@@ -680,6 +682,7 @@ def train_multihead_classifier(
     eval_filter_columns: list[str] | None = None,
     eval_code_column: str = "code",
     preprocess: bool = True,
+    code_column: str = "code",
     encryption_key: str | None = None,
     num_workers: int = 0,
     pin_memory: bool = True,
@@ -722,10 +725,10 @@ def train_multihead_classifier(
 
     # Load data
     logger.info(f"Loading annotations from {annotations_path}...")
-    df = load_annotations(annotations_path, exclude_technical=True, encryption_key=encryption_key, preprocess=preprocess)
+    df = load_annotations(annotations_path, exclude_technical=True, encryption_key=encryption_key, preprocess=preprocess, code_column=code_column)
     logger.info(f"Loaded {len(df)} samples (excluding 98.x and 99.x codes)")
 
-    unique_codes = df["code"].nunique()
+    unique_codes = df[code_column].nunique()
     unique_level1 = df["level1"].nunique()
     logger.info(f"Unique codes: {unique_codes}")
     logger.info(f"Level 1 categories: {unique_level1}")
@@ -802,7 +805,7 @@ def train_multihead_classifier(
     metrics = classifier.train(
         df=df,
         text_column="text",
-        code_column="code",
+        code_column=code_column,
         save_dir=str(output_path / "checkpoints"),
         mlflow_run_info=mlflow_run_info,
     )
