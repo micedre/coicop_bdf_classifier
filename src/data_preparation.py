@@ -71,6 +71,7 @@ def load_annotations(
     path: str | Path,
     exclude_technical: bool = True,
     encryption_key: str | None = None,
+    preprocess: bool = True,
 ) -> pd.DataFrame:
     """Load and preprocess annotation data.
 
@@ -78,16 +79,17 @@ def load_annotations(
         path: Path to annotations.parquet file
         exclude_technical: Whether to exclude 98.x and 99.x technical codes
         encryption_key: Parquet encryption key for reading encrypted files
+        preprocess: Whether to apply text preprocessing (unidecode, stopword removal, etc.)
 
     Returns:
         DataFrame with product text and hierarchical labels
     """
     df = read_parquet(path, encryption_key)
 
-    with open("data/text/stopwords.json", "r", encoding="utf-8") as json_file:
-        stopwords = json.load(json_file)
-
-    df = preprocess_text(df, 'product', stopwords)
+    if preprocess:
+        with open("data/text/stopwords.json", "r", encoding="utf-8") as json_file:
+            stopwords = json.load(json_file)
+        df = preprocess_text(df, 'product', stopwords)
 
     # The 'code' column contains the COICOP codes
     # 'coicop' column contains the label text (description)
