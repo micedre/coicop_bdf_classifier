@@ -198,6 +198,7 @@ def train_hierarchical_classifier(
     eval_text_column: str = "text",
     eval_filter_columns: list[str] | None = None,
     eval_code_column: str = "code",
+    preprocess: bool = True,
     resume_from: bool = False,
     encryption_key: str | None = None,
     max_level: int = 5,
@@ -244,7 +245,7 @@ def train_hierarchical_classifier(
 
     # Load data
     logger.info(f"Loading annotations from {annotations_path}...")
-    df = load_annotations(annotations_path, exclude_technical=True, encryption_key=encryption_key)
+    df = load_annotations(annotations_path, exclude_technical=True, encryption_key=encryption_key, preprocess=preprocess)
     logger.info(f"Loaded {len(df)} samples (excluding 98.x and 99.x codes)")
 
     # Log data statistics
@@ -377,6 +378,7 @@ def fine_tune_hierarchical_classifier(
     eval_text_column: str = "text",
     eval_filter_columns: list[str] | None = None,
     eval_code_column: str = "code",
+    preprocess: bool = True,
     encryption_key: str | None = None,
     max_level: int | None = None,
     num_workers: int | None = None,
@@ -422,7 +424,7 @@ def fine_tune_hierarchical_classifier(
 
     # Load new data
     logger.info(f"Loading new training data from {annotations_path}...")
-    df = load_annotations(annotations_path, exclude_technical=True, encryption_key=encryption_key)
+    df = load_annotations(annotations_path, exclude_technical=True, encryption_key=encryption_key, preprocess=preprocess)
     logger.info(f"Loaded {len(df)} samples (excluding 98.x and 99.x codes)")
 
     # Log data statistics
@@ -525,6 +527,7 @@ def train_basic_classifier(
     eval_text_column: str = "product",
     eval_filter_columns: list[str] | None = None,
     eval_code_column: str = "code",
+    preprocess: bool = False,
     encryption_key: str | None = None,
     tokenizer_name: str | None = None,
 ) -> BasicCOICOPClassifier:
@@ -558,9 +561,15 @@ def train_basic_classifier(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    # Load data directly (already preprocessed by build-training-data)
+    # Load data
     logger.info(f"Loading training data from {data_path}...")
     df = read_parquet(data_path, encryption_key)
+    if preprocess:
+        import json
+        from .data_preparation import preprocess_text
+        with open("data/text/stopwords.json", "r", encoding="utf-8") as f:
+            stopwords = json.load(f)
+        df = preprocess_text(df, "product", stopwords)
     logger.info(f"Loaded {len(df)} samples")
 
     unique_codes = df[code_column].nunique()
@@ -670,6 +679,7 @@ def train_multihead_classifier(
     eval_text_column: str = "text",
     eval_filter_columns: list[str] | None = None,
     eval_code_column: str = "code",
+    preprocess: bool = True,
     encryption_key: str | None = None,
     num_workers: int = 0,
     pin_memory: bool = True,
@@ -712,7 +722,7 @@ def train_multihead_classifier(
 
     # Load data
     logger.info(f"Loading annotations from {annotations_path}...")
-    df = load_annotations(annotations_path, exclude_technical=True, encryption_key=encryption_key)
+    df = load_annotations(annotations_path, exclude_technical=True, encryption_key=encryption_key, preprocess=preprocess)
     logger.info(f"Loaded {len(df)} samples (excluding 98.x and 99.x codes)")
 
     unique_codes = df["code"].nunique()
@@ -835,6 +845,7 @@ def fine_tune_basic_classifier(
     eval_text_column: str = "product",
     eval_filter_columns: list[str] | None = None,
     eval_code_column: str = "code",
+    preprocess: bool = False,
     encryption_key: str | None = None,
 ) -> BasicCOICOPClassifier:
     """Fine-tune a pre-trained basic classifier on new data.
@@ -870,6 +881,12 @@ def fine_tune_basic_classifier(
     # Load new data
     logger.info(f"Loading training data from {data_path}...")
     df = read_parquet(data_path, encryption_key)
+    if preprocess:
+        import json
+        from .data_preparation import preprocess_text
+        with open("data/text/stopwords.json", "r", encoding="utf-8") as f:
+            stopwords = json.load(f)
+        df = preprocess_text(df, "product", stopwords)
     logger.info(f"Loaded {len(df)} samples")
 
     unique_codes = df[code_column].nunique()
