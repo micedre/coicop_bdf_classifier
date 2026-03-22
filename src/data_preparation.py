@@ -72,6 +72,7 @@ def load_annotations(
     exclude_technical: bool = True,
     encryption_key: str | None = None,
     preprocess: bool = True,
+    code_column: str = "code",
 ) -> pd.DataFrame:
     """Load and preprocess annotation data.
 
@@ -80,6 +81,7 @@ def load_annotations(
         exclude_technical: Whether to exclude 98.x and 99.x technical codes
         encryption_key: Parquet encryption key for reading encrypted files
         preprocess: Whether to apply text preprocessing (unidecode, stopword removal, etc.)
+        code_column: Name of the column containing COICOP codes
 
     Returns:
         DataFrame with product text and hierarchical labels
@@ -91,16 +93,13 @@ def load_annotations(
             stopwords = json.load(json_file)
         df = preprocess_text(df, 'product', stopwords)
 
-    # The 'code' column contains the COICOP codes
-    # 'coicop' column contains the label text (description)
-
     # Filter out technical codes if requested
     if exclude_technical:
-        mask = ~df["code"].str.startswith(("98", "99"))
+        mask = ~df[code_column].str.startswith(("98", "99"))
         df = df[mask].copy()
 
     # Extract hierarchical levels from the code
-    levels = df["code"].apply(extract_levels).apply(pd.Series)
+    levels = df[code_column].apply(extract_levels).apply(pd.Series)
     df = pd.concat([df, levels], axis=1)
 
     # Clean product text

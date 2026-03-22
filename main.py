@@ -41,6 +41,7 @@ def cmd_train_hierarchical(args: argparse.Namespace) -> None:
         eval_filter_columns=args.eval_filter_columns,
         eval_code_column=args.eval_code_column,
         preprocess=args.preprocess,
+        code_column=args.code_column,
         resume_from=args.resume,
         encryption_key=args.encryption_key,
         max_level=args.max_level,
@@ -75,6 +76,7 @@ def cmd_fine_tune_hierarchical(args: argparse.Namespace) -> None:
         eval_filter_columns=args.eval_filter_columns,
         eval_code_column=args.eval_code_column,
         preprocess=args.preprocess,
+        code_column=args.code_column,
         encryption_key=args.encryption_key,
         max_level=args.max_level,
         num_workers=args.num_workers,
@@ -231,6 +233,7 @@ def cmd_train_multihead(args: argparse.Namespace) -> None:
         eval_filter_columns=args.eval_filter_columns,
         eval_code_column=args.eval_code_column,
         preprocess=args.preprocess,
+        code_column=args.code_column,
         encryption_key=args.encryption_key,
         num_workers=args.num_workers,
         pin_memory=args.pin_memory,
@@ -515,6 +518,12 @@ def main() -> int:
         help="Name of the true code column in eval data (default: code)",
     )
     train_hier_parser.add_argument(
+        "--code-column",
+        type=str,
+        default="code",
+        help="Name of the COICOP code column in training data (default: code)",
+    )
+    train_hier_parser.add_argument(
         "--preprocess",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -662,6 +671,12 @@ def main() -> int:
         type=str,
         default="code",
         help="Name of the true code column in eval data (default: code)",
+    )
+    ft_hier_parser.add_argument(
+        "--code-column",
+        type=str,
+        default="code",
+        help="Name of the COICOP code column in training data (default: code)",
     )
     ft_hier_parser.add_argument(
         "--preprocess",
@@ -1191,6 +1206,12 @@ def main() -> int:
         type=str,
         default="code",
         help="Name of the true code column in eval data (default: code)",
+    )
+    train_mh_parser.add_argument(
+        "--code-column",
+        type=str,
+        default="code",
+        help="Name of the COICOP code column in training data (default: code)",
     )
     train_mh_parser.add_argument(
         "--preprocess",
