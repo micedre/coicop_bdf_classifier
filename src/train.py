@@ -28,6 +28,7 @@ def _evaluate_on_annotations(
     eval_text_column: str,
     eval_top_k: int,
     eval_filter_columns: list[str] | None = None,
+    eval_code_column: str = "code",
 ) -> dict[str, float]:
     """Predict on eval data and return top-k accuracy metrics dict.
 
@@ -59,7 +60,7 @@ def _evaluate_on_annotations(
     logger.info(f"Loaded {len(eval_df)} evaluation samples")
 
     # Keep only the columns needed for prediction and evaluation
-    keep_cols = [eval_text_column, "code"]
+    keep_cols = [eval_text_column, eval_code_column]
     if eval_filter_columns:
         keep_cols += [c for c in eval_filter_columns if c in eval_df.columns]
     eval_df = eval_df[[c for c in keep_cols if c in eval_df.columns]]
@@ -91,7 +92,7 @@ def _evaluate_on_annotations(
         raise ValueError(f"Unknown classifier_type: {classifier_type}")
 
     # Ensure true label columns exist
-    result_df = ensure_true_labels(result_df)
+    result_df = ensure_true_labels(result_df, eval_code_column)
 
     # Compute top-k accuracy per level
     levels = detect_levels(list(result_df.columns))
@@ -146,6 +147,7 @@ def _finalize_mlflow_run(
     eval_text_column: str,
     eval_top_k: int,
     eval_filter_columns: list[str] | None,
+    eval_code_column: str = "code",
 ) -> None:
     """Run post-training evaluation, log artifacts/pyfunc, and end the MLflow run."""
     if eval_data_path:
@@ -157,6 +159,7 @@ def _finalize_mlflow_run(
             eval_text_column=eval_text_column,
             eval_top_k=eval_top_k,
             eval_filter_columns=eval_filter_columns,
+            eval_code_column=eval_code_column,
         )
         mlflow.log_metrics(eval_metrics)
 
@@ -194,6 +197,7 @@ def train_hierarchical_classifier(
     eval_top_k: int = 5,
     eval_text_column: str = "text",
     eval_filter_columns: list[str] | None = None,
+    eval_code_column: str = "code",
     resume_from: bool = False,
     encryption_key: str | None = None,
     max_level: int = 5,
@@ -351,7 +355,7 @@ def train_hierarchical_classifier(
     if mlflow_experiment:
         _finalize_mlflow_run(
             classifier, model_path, "hierarchical", "src/mlflow_model_hierarchical.py",
-            eval_data_path, eval_text_column, eval_top_k, eval_filter_columns,
+            eval_data_path, eval_text_column, eval_top_k, eval_filter_columns, eval_code_column,
         )
 
     return classifier
@@ -372,6 +376,7 @@ def fine_tune_hierarchical_classifier(
     eval_top_k: int = 5,
     eval_text_column: str = "text",
     eval_filter_columns: list[str] | None = None,
+    eval_code_column: str = "code",
     encryption_key: str | None = None,
     max_level: int | None = None,
     num_workers: int | None = None,
@@ -495,7 +500,7 @@ def fine_tune_hierarchical_classifier(
     if mlflow_experiment:
         _finalize_mlflow_run(
             classifier, ft_model_path, "hierarchical", "src/mlflow_model_hierarchical.py",
-            eval_data_path, eval_text_column, eval_top_k, eval_filter_columns,
+            eval_data_path, eval_text_column, eval_top_k, eval_filter_columns, eval_code_column,
         )
 
     return classifier
@@ -519,6 +524,7 @@ def train_basic_classifier(
     eval_top_k: int = 5,
     eval_text_column: str = "product",
     eval_filter_columns: list[str] | None = None,
+    eval_code_column: str = "code",
     encryption_key: str | None = None,
     tokenizer_name: str | None = None,
 ) -> BasicCOICOPClassifier:
@@ -633,7 +639,7 @@ def train_basic_classifier(
 
         _finalize_mlflow_run(
             classifier, model_path, "basic", "src/mlflow_model_basic.py",
-            eval_data_path, eval_text_column, eval_top_k, eval_filter_columns,
+            eval_data_path, eval_text_column, eval_top_k, eval_filter_columns, eval_code_column,
         )
 
     return classifier
@@ -663,6 +669,7 @@ def train_multihead_classifier(
     eval_top_k: int = 5,
     eval_text_column: str = "text",
     eval_filter_columns: list[str] | None = None,
+    eval_code_column: str = "code",
     encryption_key: str | None = None,
     num_workers: int = 0,
     pin_memory: bool = True,
@@ -807,7 +814,7 @@ def train_multihead_classifier(
     if mlflow_experiment:
         _finalize_mlflow_run(
             classifier, model_path, "multihead", "src/mlflow_model_multihead.py",
-            eval_data_path, eval_text_column, eval_top_k, eval_filter_columns,
+            eval_data_path, eval_text_column, eval_top_k, eval_filter_columns, eval_code_column,
         )
 
     return classifier
@@ -827,6 +834,7 @@ def fine_tune_basic_classifier(
     eval_top_k: int = 5,
     eval_text_column: str = "product",
     eval_filter_columns: list[str] | None = None,
+    eval_code_column: str = "code",
     encryption_key: str | None = None,
 ) -> BasicCOICOPClassifier:
     """Fine-tune a pre-trained basic classifier on new data.
@@ -929,7 +937,7 @@ def fine_tune_basic_classifier(
 
         _finalize_mlflow_run(
             classifier, ft_model_path, "basic", "src/mlflow_model_basic.py",
-            eval_data_path, eval_text_column, eval_top_k, eval_filter_columns,
+            eval_data_path, eval_text_column, eval_top_k, eval_filter_columns, eval_code_column,
         )
 
     return classifier
