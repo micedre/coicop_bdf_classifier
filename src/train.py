@@ -58,6 +58,12 @@ def _evaluate_on_annotations(
 
     logger.info(f"Loaded {len(eval_df)} evaluation samples")
 
+    # Keep only the columns needed for prediction and evaluation
+    keep_cols = [eval_text_column, "code"]
+    if eval_filter_columns:
+        keep_cols += [c for c in eval_filter_columns if c in eval_df.columns]
+    eval_df = eval_df[[c for c in keep_cols if c in eval_df.columns]]
+
     if classifier_type == "hierarchical":
         predictor = HierarchicalCOICOPPredictor(model_path)
         result_df = predictor.predict_dataframe(
