@@ -26,6 +26,7 @@ def cmd_train_hierarchical(args: argparse.Namespace) -> None:
         ngram_max_n=args.ngram_max,
         ngram_num_tokens=args.ngram_vocab_size,
         embedding_dim=args.embedding_dim,
+        parent_embedding_dim=args.parent_embedding_dim,
         max_seq_length=args.max_seq_length,
         batch_size=args.batch_size,
         lr=args.lr,
@@ -428,6 +429,12 @@ def main() -> int:
         type=int,
         default=128,
         help="Text embedding dimension",
+    )
+    train_hier_parser.add_argument(
+        "--parent-embedding-dim",
+        type=int,
+        default=32,
+        help="Embedding dimension for parent code categorical feature (default: 32)",
     )
     train_hier_parser.add_argument(
         "--max-seq-length",
