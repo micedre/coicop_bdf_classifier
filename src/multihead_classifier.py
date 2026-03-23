@@ -519,12 +519,9 @@ class MultiHeadCOICOPClassifier:
         # Build per-level label arrays (use -100 for missing)
         level_labels: dict[str, np.ndarray] = {}
         for level_name in self.level_names:
-            labels = np.full(len(df), -100, dtype=np.int64)
-            for i, (_, row) in enumerate(df.iterrows()):
-                val = row.get(level_name)
-                if pd.notna(val) and val in self.level_label_to_idx[level_name]:
-                    labels[i] = self.level_label_to_idx[level_name][val]
-            level_labels[level_name] = labels
+            mapping = self.level_label_to_idx[level_name]
+            mapped = df[level_name].map(mapping)
+            level_labels[level_name] = mapped.fillna(-100).astype(np.int64).values
 
         # Stratified train/val split on level 1 labels
         primary_level = self.level_names[0]

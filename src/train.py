@@ -186,16 +186,22 @@ def _finalize_mlflow_run(
         )
         mlflow.log_metrics(eval_metrics)
 
-    mlflow.log_artifacts(str(model_path), artifact_path="model")
+    try:
+        mlflow.log_artifacts(str(model_path), artifact_path="model")
+    except Exception as exc:
+        logger.warning("Failed to upload model artifacts to MLflow: %s", exc)
 
-    mlflow.pyfunc.log_model(
-        name="pyfunc_model",
-        python_model=pyfunc_module,
-        artifacts={
-            "model_dir": str(model_path),
-            "stopwords": "data/text/stopwords.json",
-        },
-    )
+    try:
+        mlflow.pyfunc.log_model(
+            name="pyfunc_model",
+            python_model=pyfunc_module,
+            artifacts={
+                "model_dir": str(model_path),
+                "stopwords": "data/text/stopwords.json",
+            },
+        )
+    except Exception as exc:
+        logger.warning("Failed to log pyfunc model to MLflow: %s", exc)
 
     mlflow.end_run()
 
