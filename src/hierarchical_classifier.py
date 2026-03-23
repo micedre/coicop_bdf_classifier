@@ -943,6 +943,7 @@ class HierarchicalCOICOPClassifier:
         return_all_levels: bool = True,
         top_k: int = 1,
         confidence_threshold: float | None = None,
+        beam_size: int = 1,
     ) -> dict:
         """Cascade predictions through all 5 levels.
 
@@ -963,6 +964,9 @@ class HierarchicalCOICOPClassifier:
         """
         if not self._is_trained:
             raise RuntimeError("Classifier must be trained before prediction.")
+
+        if beam_size > 1:
+            return self._beam_predict(texts, return_all_levels, beam_size, confidence_threshold)
 
         n = len(texts)
         all_levels: dict[str, dict] = {}
@@ -1132,6 +1136,127 @@ class HierarchicalCOICOPClassifier:
             }
 
         return output
+
+    def _beam_predict(
+        self,
+        texts: list[str],
+        return_all_levels: bool,
+        beam_size: int,
+        confidence_threshold: float | None,
+    ) -> dict:
+        """Beam search cascade: maintain beam_size candidate paths at each level.
+
+        At each level the beam_size current beams are each expanded with the
+        top-beam_size predictions, then pruned back to beam_size by joint
+        log-probability.  The top beam yields the final prediction.
+        """
+        import math
+
+        n = len(texts)
+        active_levels = COICOP_LEVELS[:self.config.max_level]
+
+        # beams[i] = sorted list of (joint_log_prob, {level: code}, {level: conf})
+        beams: list[list[tuple]] = [[(0.0, {}, {})] for _ in range(n)]
+
+        for level_idx, level_name in enumerate(active_levels):
+            if level_name not in self.level_classifiers:
+                continue
+            classifier = self.level_classifiers[level_name]
+            idx_to_label = self.level_idx_to_label[level_name]
+            has_parent = level_name in self.parent_code_to_idx and level_idx > 0
+            prev_level = COICOP_LEVELS[level_idx - 1] if level_idx > 0 else None
+
+            num_current_beams = len(beams[0])
+            new_beams: list[list[tuple]] = [[] for _ in range(n)]
+
+            for beam_idx in range(num_current_beams):
+                if has_parent and prev_level:
+                    parent_codes = [
+                        beams[i][beam_idx][1].get(prev_level, "") if beam_idx < len(beams[i]) else ""
+                        for i in range(n)
+                    ]
+                    parent_confs = [
+                        beams[i][beam_idx][2].get(prev_level, 0.9) if beam_idx < len(beams[i]) else 0.9
+                        for i in range(n)
+                    ]
+                    parent_code_to_idx = self.parent_code_to_idx[level_name]
+                    parent_code_indices = np.array([parent_code_to_idx.get(c, 0) for c in parent_codes])
+                    conf_buckets = self._discretize_confidence(np.array(parent_confs))
+                else:
+                    parent_code_indices = None
+                    conf_buckets = None
+
+                X = self._prepare_input_with_features(texts, parent_code_indices, conf_buckets)
+                raw = self._batched_predict(classifier, X, top_k=beam_size)
+
+                # Normalize to shape (n, beam_size)
+                preds = raw["prediction"].reshape(n, -1)
+                confs = raw["confidence"].reshape(n, -1)
+
+                for i in range(n):
+                    if beam_idx >= len(beams[i]):
+                        continue
+                    prev_lp, prev_codes, prev_confs = beams[i][beam_idx]
+                    for k in range(preds.shape[1]):
+                        code = idx_to_label[int(preds[i, k])]
+                        conf = float(confs[i, k])
+                        new_lp = prev_lp + math.log(max(conf, 1e-9))
+                        new_beams[i].append((
+                            new_lp,
+                            {**prev_codes, level_name: code},
+                            {**prev_confs, level_name: conf},
+                        ))
+
+            for i in range(n):
+                new_beams[i].sort(key=lambda x: -x[0])
+                beams[i] = new_beams[i][:beam_size]
+
+        # Build return dict from top beam per text
+        final_code: list[str] = []
+        final_level_out: list[str] = []
+        final_confidence: list[float] = []
+        combined_conf: list[float] = []
+
+        for i in range(n):
+            best_lp, best_codes, best_confs = beams[i][0] if beams[i] else (0.0, {}, {})
+            deepest = ""
+            for lv in reversed(active_levels):
+                if lv in best_codes:
+                    deepest = lv
+                    break
+            final_code.append(best_codes.get(deepest, ""))
+            final_level_out.append(deepest)
+            final_confidence.append(best_confs.get(deepest, 0.0))
+            combined_conf.append(math.exp(best_lp))
+
+        result: dict = {
+            "final_code": final_code,
+            "final_level": final_level_out,
+            "final_confidence": final_confidence,
+            "combined_confidence": combined_conf,
+        }
+
+        if return_all_levels:
+            all_levels: dict[str, dict] = {}
+            for level_name in active_levels:
+                if level_name not in self.level_classifiers:
+                    continue
+                if beam_size > 1:
+                    preds_list = [
+                        [beams[i][b][1].get(level_name, "") for b in range(len(beams[i]))]
+                        for i in range(n)
+                    ]
+                    confs_list = [
+                        [beams[i][b][2].get(level_name, 0.0) for b in range(len(beams[i]))]
+                        for i in range(n)
+                    ]
+                else:
+                    preds_list = [beams[i][0][1].get(level_name, "") if beams[i] else "" for i in range(n)]
+                    confs_list = [beams[i][0][2].get(level_name, 0.0) if beams[i] else 0.0 for i in range(n)]
+                all_levels[level_name] = {"predictions": preds_list, "confidence": confs_list}
+            result["all_levels"] = all_levels
+
+        return result
 
     def save(self, path: str | Path, mlflow_run_id: str | None = None) -> None:
         """Save the hierarchical classifier.

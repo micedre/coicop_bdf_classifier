@@ -29,6 +29,7 @@ def _evaluate_on_annotations(
     eval_top_k: int,
     eval_filter_columns: list[str] | None = None,
     eval_code_column: str = "code",
+    eval_beam_size: int = 1,
 ) -> dict[str, float]:
     """Predict on eval data and return top-k accuracy metrics dict.
 
@@ -71,6 +72,7 @@ def _evaluate_on_annotations(
             eval_df,
             text_column=eval_text_column,
             top_k=eval_top_k,
+            beam_size=eval_beam_size,
         )
     elif classifier_type == "multihead":
         from .predict import MultiHeadCOICOPPredictor
@@ -148,9 +150,12 @@ def _finalize_mlflow_run(
     eval_top_k: int,
     eval_filter_columns: list[str] | None,
     eval_code_column: str = "code",
+    eval_beam_size: int = 1,
 ) -> None:
     """Run post-training evaluation, log artifacts/pyfunc, and end the MLflow run."""
     if eval_data_path:
+        eval_prediction_type = "greedy" if eval_beam_size <= 1 else f"beam_{eval_beam_size}"
+        mlflow.log_param("eval_prediction_type", eval_prediction_type)
         eval_metrics = _evaluate_on_annotations(
             classifier=classifier,
             model_path=model_path,
@@ -160,6 +165,7 @@ def _finalize_mlflow_run(
             eval_top_k=eval_top_k,
             eval_filter_columns=eval_filter_columns,
             eval_code_column=eval_code_column,
+            eval_beam_size=eval_beam_size,
         )
         mlflow.log_metrics(eval_metrics)
 
@@ -198,6 +204,7 @@ def train_hierarchical_classifier(
     eval_text_column: str = "text",
     eval_filter_columns: list[str] | None = None,
     eval_code_column: str = "code",
+    eval_beam_size: int = 1,
     preprocess: bool = True,
     code_column: str = "code",
     resume_from: bool = False,
@@ -358,6 +365,7 @@ def train_hierarchical_classifier(
         _finalize_mlflow_run(
             classifier, model_path, "hierarchical", "src/mlflow_model_hierarchical.py",
             eval_data_path, eval_text_column, eval_top_k, eval_filter_columns, eval_code_column,
+            eval_beam_size,
         )
 
     return classifier
@@ -379,6 +387,7 @@ def fine_tune_hierarchical_classifier(
     eval_text_column: str = "text",
     eval_filter_columns: list[str] | None = None,
     eval_code_column: str = "code",
+    eval_beam_size: int = 1,
     preprocess: bool = True,
     code_column: str = "code",
     encryption_key: str | None = None,
@@ -505,6 +514,7 @@ def fine_tune_hierarchical_classifier(
         _finalize_mlflow_run(
             classifier, ft_model_path, "hierarchical", "src/mlflow_model_hierarchical.py",
             eval_data_path, eval_text_column, eval_top_k, eval_filter_columns, eval_code_column,
+            eval_beam_size,
         )
 
     return classifier
