@@ -72,6 +72,7 @@ class _HierarchicalBasePredictor:
         return_all_levels: bool = True,
         top_k: int = 1,
         confidence_threshold: float | None = None,
+        beam_size: int = 1,
     ) -> list[dict]:
         """Predict COICOP codes for input texts."""
         result = self.classifier.predict(
@@ -79,6 +80,7 @@ class _HierarchicalBasePredictor:
             return_all_levels=return_all_levels,
             top_k=top_k,
             confidence_threshold=confidence_threshold,
+            beam_size=beam_size,
         )
 
         predictions = []
@@ -120,6 +122,7 @@ class _HierarchicalBasePredictor:
         return_all_levels: bool = True,
         top_k: int = 1,
         confidence_threshold: float | None = None,
+        beam_size: int = 1,
     ) -> list[dict]:
         """Predict in batches for large datasets."""
         all_predictions = []
@@ -131,6 +134,7 @@ class _HierarchicalBasePredictor:
                 return_all_levels=return_all_levels,
                 top_k=top_k,
                 confidence_threshold=confidence_threshold,
+                beam_size=beam_size,
             )
             all_predictions.extend(predictions)
 
@@ -146,6 +150,7 @@ class _HierarchicalBasePredictor:
         batch_size: int = 64,
         top_k: int = 1,
         confidence_threshold: float | None = None,
+        beam_size: int = 1,
     ) -> pd.DataFrame:
         """Predict codes for a DataFrame."""
         texts = df[text_column].tolist()
@@ -155,6 +160,7 @@ class _HierarchicalBasePredictor:
             return_all_levels=True,
             top_k=top_k,
             confidence_threshold=confidence_threshold,
+            beam_size=beam_size,
         )
 
         result_df = df.copy()
@@ -198,6 +204,7 @@ class _HierarchicalBasePredictor:
         batch_size: int = 64,
         top_k: int = 1,
         confidence_threshold: float | None = None,
+        beam_size: int = 1,
     ) -> None:
         """Predict codes for a file and save results."""
         input_path = Path(input_path)
@@ -214,6 +221,7 @@ class _HierarchicalBasePredictor:
             batch_size=batch_size,
             top_k=top_k,
             confidence_threshold=confidence_threshold,
+            beam_size=beam_size,
         )
 
         _write_output_file(result_df, output_path)

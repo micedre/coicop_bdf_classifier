@@ -40,6 +40,7 @@ def cmd_train_hierarchical(args: argparse.Namespace) -> None:
         eval_text_column=args.eval_text_column,
         eval_filter_columns=args.eval_filter_columns,
         eval_code_column=args.eval_code_column,
+        eval_beam_size=args.eval_beam_size,
         preprocess=args.preprocess,
         code_column=args.code_column,
         resume_from=args.resume,
@@ -75,6 +76,7 @@ def cmd_fine_tune_hierarchical(args: argparse.Namespace) -> None:
         eval_text_column=args.eval_text_column,
         eval_filter_columns=args.eval_filter_columns,
         eval_code_column=args.eval_code_column,
+        eval_beam_size=args.eval_beam_size,
         preprocess=args.preprocess,
         code_column=args.code_column,
         encryption_key=args.encryption_key,
@@ -174,6 +176,7 @@ def cmd_predict_hierarchical(args: argparse.Namespace) -> None:
             batch_size=args.batch_size,
             top_k=args.top_k,
             confidence_threshold=args.confidence_threshold,
+            beam_size=args.beam_size,
         )
     else:
         # Text-based prediction
@@ -183,7 +186,8 @@ def cmd_predict_hierarchical(args: argparse.Namespace) -> None:
             texts = args.texts
 
         predictions = predictor.predict(
-            texts, top_k=args.top_k, confidence_threshold=args.confidence_threshold
+            texts, top_k=args.top_k, confidence_threshold=args.confidence_threshold,
+            beam_size=args.beam_size,
         )
         for pred in predictions:
             # Format hierarchical output nicely
@@ -498,6 +502,12 @@ def main() -> int:
         help="Maximum K for top-k accuracy evaluation (default: 5)",
     )
     train_hier_parser.add_argument(
+        "--eval-beam-size",
+        type=int,
+        default=1,
+        help="Beam size for hierarchical cascade during post-training evaluation (default: 1 = greedy)",
+    )
+    train_hier_parser.add_argument(
         "--eval-text-column",
         type=str,
         default="text",
@@ -651,6 +661,12 @@ def main() -> int:
         type=int,
         default=5,
         help="Maximum K for top-k accuracy evaluation (default: 5)",
+    )
+    ft_hier_parser.add_argument(
+        "--eval-beam-size",
+        type=int,
+        default=1,
+        help="Beam size for hierarchical cascade during post-training evaluation (default: 1 = greedy)",
     )
     ft_hier_parser.add_argument(
         "--eval-text-column",
@@ -1046,6 +1062,12 @@ def main() -> int:
         type=float,
         default=None,
         help="Minimum confidence per level; stop at the deepest level meeting this threshold",
+    )
+    predict_hier_parser.add_argument(
+        "--beam-size",
+        type=int,
+        default=1,
+        help="Beam size for hierarchical cascade (default: 1 = greedy). Higher values improve accuracy at the cost of speed.",
     )
     predict_hier_parser.add_argument(
         "texts",
