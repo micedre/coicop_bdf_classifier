@@ -81,6 +81,7 @@ def build_training_data(
     max_per_code: int = 1000,
     seed: int = 42,
     encryption_key: str | None = None,
+    preprocess: bool = True,
 ) -> None:
     """Build a balanced training dataset from DDC and synthetic data.
 
@@ -101,7 +102,8 @@ def build_training_data(
     ddc["source"] = "ddc"
 
     logger.info("DDC rows before preprocessing: %d", len(ddc))
-    ddc = preprocess_text(ddc, "product", stopwords)
+    if preprocess:
+        ddc = preprocess_text(ddc, "product", stopwords)
     ddc = ddc.drop_duplicates(subset=["product", "code"])
     logger.info("DDC rows after preprocessing + dedup: %d", len(ddc))
 
@@ -115,7 +117,8 @@ def build_training_data(
     synthetic["source"] = "synthetic"
 
     logger.info("Synthetic rows before preprocessing: %d", len(synthetic))
-    synthetic = preprocess_text(synthetic, "product", stopwords)
+    if preprocess:
+        synthetic = preprocess_text(synthetic, "product", stopwords)
     synthetic = synthetic.drop_duplicates(subset=["product", "code"])
     logger.info("Synthetic rows after preprocessing + dedup: %d", len(synthetic))
 

@@ -350,6 +350,7 @@ def cmd_build_training_data(args: argparse.Namespace) -> None:
         max_per_code=args.max_per_code,
         seed=args.seed,
         encryption_key=args.encryption_key,
+        preprocess=args.preprocess,
     )
 
 
@@ -1435,6 +1436,12 @@ def main() -> int:
         type=str,
         default=None,
         help="Parquet encryption key (hex, 32 chars) for reading/writing encrypted files",
+    )
+    build_data_parser.add_argument(
+        "--preprocess",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Apply text preprocessing (default: True)",
     )
     build_data_parser.set_defaults(func=cmd_build_training_data)
 
