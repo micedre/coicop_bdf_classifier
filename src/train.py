@@ -19,6 +19,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+_SECRET_PARAMS = {"encryption_key"}
+
+
+def _log_all_params(func_args: dict) -> None:
+    """Log all function arguments to MLflow, excluding secrets and None values."""
+    to_log = {}
+    for k, v in func_args.items():
+        if k in _SECRET_PARAMS:
+            continue
+        if v is None:
+            continue
+        if isinstance(v, (list, dict)):
+            to_log[k] = str(v)
+        else:
+            to_log[k] = v
+    mlflow.log_params(to_log)
+
 
 def _evaluate_on_annotations(
     classifier,
@@ -245,6 +262,8 @@ def train_hierarchical_classifier(
     Returns:
         Trained HierarchicalCOICOPClassifier
     """
+    _all_args = dict(locals())
+
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -282,30 +301,13 @@ def train_hierarchical_classifier(
             mlflow.start_run(run_id=saved_mlflow_run_id)
         else:
             mlflow.start_run()
+        _log_all_params(_all_args)
         mlflow.log_params({
             "classifier_type": "hierarchical",
-            "ngram_min_n": ngram_min_n,
-            "ngram_max_n": ngram_max_n,
-            "ngram_num_tokens": ngram_num_tokens,
-            "embedding_dim": embedding_dim,
-            "max_seq_length": max_seq_length,
-            "batch_size": batch_size,
-            "lr": lr,
-            "num_epochs": num_epochs,
-            "patience": patience,
-            "min_samples": min_samples,
-            "use_parent_features": use_parent_features,
-            "teacher_forcing_ratio": teacher_forcing_ratio,
-            "max_level": max_level,
             "num_samples": len(df),
             "unique_codes": unique_codes,
             "unique_level1": unique_level1,
-            "data_path": annotations_path,
         })
-        if tokenizer_name:
-            mlflow.log_param("tokenizer_name", tokenizer_name)
-        if eval_data_path:
-            mlflow.log_param("eval_data_path", eval_data_path)
 
         run_id = mlflow.active_run().info.run_id
         mlflow_run_info = {
@@ -418,6 +420,8 @@ def fine_tune_hierarchical_classifier(
     Returns:
         Fine-tuned HierarchicalCOICOPClassifier.
     """
+    _all_args = dict(locals())
+
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -449,28 +453,13 @@ def fine_tune_hierarchical_classifier(
     if mlflow_experiment:
         mlflow.set_experiment(mlflow_experiment)
         mlflow.start_run()
-        params = {
+        _log_all_params(_all_args)
+        mlflow.log_params({
+            "classifier_type": "hierarchical",
             "task": "fine-tuning",
-            "base_model_path": model_path,
             "num_samples": len(df),
             "unique_codes": unique_codes,
-            "data_path": annotations_path,
-        }
-        if levels is not None:
-            params["levels"] = ",".join(levels)
-        if lr is not None:
-            params["lr"] = lr
-        if num_epochs is not None:
-            params["num_epochs"] = num_epochs
-        if batch_size is not None:
-            params["batch_size"] = batch_size
-        if patience is not None:
-            params["patience"] = patience
-        if teacher_forcing_ratio is not None:
-            params["teacher_forcing_ratio"] = teacher_forcing_ratio
-        mlflow.log_params(params)
-        if eval_data_path:
-            mlflow.log_param("eval_data_path", eval_data_path)
+        })
 
         run_id = mlflow.active_run().info.run_id
         mlflow_run_info = {
@@ -570,6 +559,8 @@ def train_basic_classifier(
     Returns:
         Trained BasicCOICOPClassifier.
     """
+    _all_args = dict(locals())
+
     from .data_preparation import read_parquet
 
     output_path = Path(output_dir)
@@ -594,25 +585,12 @@ def train_basic_classifier(
     if mlflow_experiment:
         mlflow.set_experiment(mlflow_experiment)
         mlflow.start_run()
+        _log_all_params(_all_args)
         mlflow.log_params({
             "classifier_type": "basic",
-            "ngram_min_n": ngram_min_n,
-            "ngram_max_n": ngram_max_n,
-            "ngram_num_tokens": ngram_num_tokens,
-            "embedding_dim": embedding_dim,
-            "max_seq_length": max_seq_length,
-            "batch_size": batch_size,
-            "lr": lr,
-            "num_epochs": num_epochs,
-            "patience": patience,
             "num_samples": len(df),
             "unique_codes": unique_codes,
-            "data_path": data_path,
         })
-        if tokenizer_name:
-            mlflow.log_param("tokenizer_name", tokenizer_name)
-        if eval_data_path:
-            mlflow.log_param("eval_data_path", eval_data_path)
 
         from .mlflow_utils import make_trainer_params
 
@@ -732,6 +710,8 @@ def train_multihead_classifier(
     Returns:
         Trained MultiHeadCOICOPClassifier.
     """
+    _all_args = dict(locals())
+
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -750,34 +730,13 @@ def train_multihead_classifier(
     if mlflow_experiment:
         mlflow.set_experiment(mlflow_experiment)
         mlflow.start_run()
+        _log_all_params(_all_args)
         mlflow.log_params({
             "classifier_type": "multihead",
-            "ngram_min_n": ngram_min_n,
-            "ngram_max_n": ngram_max_n,
-            "ngram_num_tokens": ngram_num_tokens,
-            "embedding_dim": embedding_dim,
-            "max_seq_length": max_seq_length,
-            "n_attention_layers": n_attention_layers,
-            "n_attention_heads": n_attention_heads,
-            "n_kv_heads": n_kv_heads,
-            "n_label_attention_heads": n_label_attention_heads,
-            "batch_size": batch_size,
-            "lr": lr,
-            "num_epochs": num_epochs,
-            "patience": patience,
-            "min_samples": min_samples,
-            "max_level": max_level,
             "num_samples": len(df),
             "unique_codes": unique_codes,
             "unique_level1": unique_level1,
-            "data_path": annotations_path,
         })
-        if loss_weights is not None:
-            mlflow.log_param("loss_weights", str(loss_weights))
-        if tokenizer_name:
-            mlflow.log_param("tokenizer_name", tokenizer_name)
-        if eval_data_path:
-            mlflow.log_param("eval_data_path", eval_data_path)
 
         run_id = mlflow.active_run().info.run_id
         mlflow_run_info = {
@@ -884,6 +843,8 @@ def fine_tune_basic_classifier(
     Returns:
         Fine-tuned BasicCOICOPClassifier.
     """
+    _all_args = dict(locals())
+
     from .data_preparation import read_parquet
 
     output_path = Path(output_dir)
@@ -912,25 +873,13 @@ def fine_tune_basic_classifier(
     if mlflow_experiment:
         mlflow.set_experiment(mlflow_experiment)
         mlflow.start_run()
-        params = {
-            "task": "fine-tuning",
+        _log_all_params(_all_args)
+        mlflow.log_params({
             "classifier_type": "basic",
-            "base_model_path": model_path,
+            "task": "fine-tuning",
             "num_samples": len(df),
             "unique_codes": unique_codes,
-            "data_path": data_path,
-        }
-        if lr is not None:
-            params["lr"] = lr
-        if num_epochs is not None:
-            params["num_epochs"] = num_epochs
-        if batch_size is not None:
-            params["batch_size"] = batch_size
-        if patience is not None:
-            params["patience"] = patience
-        mlflow.log_params(params)
-        if eval_data_path:
-            mlflow.log_param("eval_data_path", eval_data_path)
+        })
 
         from .mlflow_utils import make_trainer_params
 
