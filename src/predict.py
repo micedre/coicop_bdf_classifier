@@ -75,13 +75,14 @@ class _HierarchicalBasePredictor:
         beam_size: int = 1,
     ) -> list[dict]:
         """Predict COICOP codes for input texts."""
-        result = self.classifier.predict(
-            texts,
+        kwargs = dict(
             return_all_levels=return_all_levels,
             top_k=top_k,
             confidence_threshold=confidence_threshold,
-            beam_size=beam_size,
         )
+        if beam_size > 1:
+            kwargs["beam_size"] = beam_size
+        result = self.classifier.predict(texts, **kwargs)
 
         predictions = []
         for i, text in enumerate(texts):
