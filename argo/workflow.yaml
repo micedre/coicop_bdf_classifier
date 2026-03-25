@@ -1,0 +1,295 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: coicop-pipeline-
+  labels:
+    app: coicop-bdf-classifier
+spec:
+  entrypoint: coicop-pipeline
+  serviceAccountName: default
+
+  # -----------------------------------------------------------------------
+  # All S3 paths and settings are configurable at submit time:
+  #   argo submit argo/workflow.yaml -p s3-training-data="s3://my-bucket/..."
+  # -----------------------------------------------------------------------
+  arguments:
+    parameters:
+      # Input: raw DDC parquet already on S3 (output of extract-ddc, run separately)
+      - name: s3-raw-ddc
+        value: "s3://travail/projet-ml-classification-bdf/confidentiel/personnel_sensible/data/raw/ddc.parquet"
+
+      # build-training-data output
+      - name: s3-training-data
+        value: "s3://travail/projet-ml-classification-bdf/confidentiel/personnel_sensible/data/train/data.parquet"
+
+      # train-hierarchical output directory (model artifacts written here)
+      - name: s3-hierarchical-model
+        value: "s3://travail/projet-ml-classification-bdf/confidentiel/personnel_sensible/models/hierarchical"
+
+      # train-basic output directory
+      - name: s3-basic-model
+        value: "s3://travail/projet-ml-classification-bdf/confidentiel/personnel_sensible/models/basic"
+
+      # Input file to classify (predict steps)
+      - name: s3-predict-input
+        value: "s3://travail/projet-ml-classification-bdf/confidentiel/personnel_sensible/data/to_predict.parquet"
+
+      # predict-hierarchical output
+      - name: s3-hierarchical-predictions
+        value: "s3://travail/projet-ml-classification-bdf/confidentiel/personnel_sensible/predictions/hierarchical.parquet"
+
+      # predict-basic output
+      - name: s3-basic-predictions
+        value: "s3://travail/projet-ml-classification-bdf/confidentiel/personnel_sensible/predictions/basic.parquet"
+
+      # MLflow experiment name (set to "" to disable MLflow tracking)
+      - name: mlflow-experiment
+        value: "coicop-bdf"
+
+      # Docker image (update to a specific SHA tag for reproducible runs)
+      - name: image
+        value: "ghcr.io/OWNER/coicop-bdf-classifier:latest"
+
+  # -----------------------------------------------------------------------
+  # Templates
+  # -----------------------------------------------------------------------
+  templates:
+
+    # ------------------------------------------------------------------
+    # Main DAG
+    # ------------------------------------------------------------------
+    - name: coicop-pipeline
+      dag:
+        tasks:
+          - name: build-training-data
+            template: build-training-data
+            arguments:
+              parameters:
+                - name: s3-raw-ddc
+                  value: "{{workflow.parameters.s3-raw-ddc}}"
+                - name: s3-training-data
+                  value: "{{workflow.parameters.s3-training-data}}"
+                - name: image
+                  value: "{{workflow.parameters.image}}"
+
+          - name: train-hierarchical
+            template: train-hierarchical
+            dependencies: [build-training-data]
+            arguments:
+              parameters:
+                - name: s3-training-data
+                  value: "{{workflow.parameters.s3-training-data}}"
+                - name: s3-hierarchical-model
+                  value: "{{workflow.parameters.s3-hierarchical-model}}"
+                - name: mlflow-experiment
+                  value: "{{workflow.parameters.mlflow-experiment}}"
+                - name: image
+                  value: "{{workflow.parameters.image}}"
+
+          - name: train-basic
+            template: train-basic
+            dependencies: [build-training-data]
+            arguments:
+              parameters:
+                - name: s3-training-data
+                  value: "{{workflow.parameters.s3-training-data}}"
+                - name: s3-basic-model
+                  value: "{{workflow.parameters.s3-basic-model}}"
+                - name: mlflow-experiment
+                  value: "{{workflow.parameters.mlflow-experiment}}"
+                - name: image
+                  value: "{{workflow.parameters.image}}"
+
+          - name: predict-hierarchical
+            template: predict-hierarchical
+            dependencies: [train-hierarchical]
+            arguments:
+              parameters:
+                - name: s3-hierarchical-model
+                  value: "{{workflow.parameters.s3-hierarchical-model}}"
+                - name: s3-predict-input
+                  value: "{{workflow.parameters.s3-predict-input}}"
+                - name: s3-hierarchical-predictions
+                  value: "{{workflow.parameters.s3-hierarchical-predictions}}"
+                - name: image
+                  value: "{{workflow.parameters.image}}"
+
+          - name: predict-basic
+            template: predict-basic
+            dependencies: [train-basic]
+            arguments:
+              parameters:
+                - name: s3-basic-model
+                  value: "{{workflow.parameters.s3-basic-model}}"
+                - name: s3-predict-input
+                  value: "{{workflow.parameters.s3-predict-input}}"
+                - name: s3-basic-predictions
+                  value: "{{workflow.parameters.s3-basic-predictions}}"
+                - name: image
+                  value: "{{workflow.parameters.image}}"
+
+    # ------------------------------------------------------------------
+    # Step: build-training-data
+    # Builds a balanced training parquet from the raw DDC parquet.
+    # ------------------------------------------------------------------
+    - name: build-training-data
+      inputs:
+        parameters:
+          - name: s3-raw-ddc
+          - name: s3-training-data
+          - name: image
+      container:
+        image: "{{inputs.parameters.image}}"
+        command: ["python", "main.py"]
+        args:
+          - build-training-data
+          - "--ddc"
+          - "{{inputs.parameters.s3-raw-ddc}}"
+          - "--output"
+          - "{{inputs.parameters.s3-training-data}}"
+        envFrom:
+          - secretRef:
+              name: s3-credentials  # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_S3_ENDPOINT, AWS_SESSION_TOKEN
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+
+    # ------------------------------------------------------------------
+    # Step: train-hierarchical
+    # Trains the 5-level hierarchical classifier.
+    # ------------------------------------------------------------------
+    - name: train-hierarchical
+      inputs:
+        parameters:
+          - name: s3-training-data
+          - name: s3-hierarchical-model
+          - name: mlflow-experiment
+          - name: image
+      container:
+        image: "{{inputs.parameters.image}}"
+        command: ["python", "main.py"]
+        args:
+          - train-hierarchical
+          - "--data"
+          - "{{inputs.parameters.s3-training-data}}"
+          - "--output"
+          - "{{inputs.parameters.s3-hierarchical-model}}"
+          - "--mlflow-experiment"
+          - "{{inputs.parameters.mlflow-experiment}}"
+        envFrom:
+          - secretRef:
+              name: s3-credentials
+          - secretRef:
+              name: mlflow-credentials  # MLFLOW_TRACKING_URI, MLFLOW_TRACKING_USERNAME, MLFLOW_TRACKING_PASSWORD
+        resources:
+          requests:
+            cpu: "4"
+            memory: "16Gi"
+          limits:
+            cpu: "8"
+            memory: "32Gi"
+
+    # ------------------------------------------------------------------
+    # Step: train-basic
+    # Trains the flat single-level classifier.
+    # ------------------------------------------------------------------
+    - name: train-basic
+      inputs:
+        parameters:
+          - name: s3-training-data
+          - name: s3-basic-model
+          - name: mlflow-experiment
+          - name: image
+      container:
+        image: "{{inputs.parameters.image}}"
+        command: ["python", "main.py"]
+        args:
+          - train-basic
+          - "--data"
+          - "{{inputs.parameters.s3-training-data}}"
+          - "--output"
+          - "{{inputs.parameters.s3-basic-model}}"
+          - "--mlflow-experiment"
+          - "{{inputs.parameters.mlflow-experiment}}"
+        envFrom:
+          - secretRef:
+              name: s3-credentials
+          - secretRef:
+              name: mlflow-credentials
+        resources:
+          requests:
+            cpu: "4"
+            memory: "16Gi"
+          limits:
+            cpu: "8"
+            memory: "32Gi"
+
+    # ------------------------------------------------------------------
+    # Step: predict-hierarchical
+    # Runs batch prediction with the hierarchical model.
+    # ------------------------------------------------------------------
+    - name: predict-hierarchical
+      inputs:
+        parameters:
+          - name: s3-hierarchical-model
+          - name: s3-predict-input
+          - name: s3-hierarchical-predictions
+          - name: image
+      container:
+        image: "{{inputs.parameters.image}}"
+        command: ["python", "main.py"]
+        args:
+          - predict-hierarchical
+          - "--model"
+          - "{{inputs.parameters.s3-hierarchical-model}}"
+          - "--file"
+          - "{{inputs.parameters.s3-predict-input}}"
+          - "--output"
+          - "{{inputs.parameters.s3-hierarchical-predictions}}"
+        envFrom:
+          - secretRef:
+              name: s3-credentials
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+
+    # ------------------------------------------------------------------
+    # Step: predict-basic
+    # Runs batch prediction with the basic flat model.
+    # ------------------------------------------------------------------
+    - name: predict-basic
+      inputs:
+        parameters:
+          - name: s3-basic-model
+          - name: s3-predict-input
+          - name: s3-basic-predictions
+          - name: image
+      container:
+        image: "{{inputs.parameters.image}}"
+        command: ["python", "main.py"]
+        args:
+          - predict-basic
+          - "--model"
+          - "{{inputs.parameters.s3-basic-model}}"
+          - "--file"
+          - "{{inputs.parameters.s3-predict-input}}"
+          - "--output"
+          - "{{inputs.parameters.s3-basic-predictions}}"
+        envFrom:
+          - secretRef:
+              name: s3-credentials
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
