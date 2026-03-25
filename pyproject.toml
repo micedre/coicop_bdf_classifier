@@ -26,30 +26,3 @@ synth = [
     "langchain-openai>=0.3.0",
 ]
 
-[tool.uv]
-index-url = "https://nexus.insee.fr/repository/pypi-proxy/simple/"
-
-[[tool.uv.index]]
-url = "https://nexus.insee.fr/repository/pypi-public/simple"
-default = true
-
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://nexus.insee.fr/repository/pypi-pytorch-cpu/simple"
-explicit = true
-
-[tool.uv.sources]
-torch = [
-  { index = "pytorch-cpu" },
-]
-torchvision = [
-  { index = "pytorch-cpu" },
-]
-
-[dependency-groups]
-dev = [
-    "pytest>=8.0",
-]
-torch = [
-    "torch>=2.7.1",
-]
