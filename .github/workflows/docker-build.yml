@@ -1,5 +1,4 @@
 name: Build and push Docker image
-
 on:
   push:
     branches:
@@ -7,18 +6,15 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
-
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-
     steps:
       - name: Free up disk space
         run: |
@@ -26,6 +22,11 @@ jobs:
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/.rustup
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /opt/hostedtoolcache/Java_Temurin*
+          sudo rm -rf /opt/hostedtoolcache/Ruby
+          sudo apt-get clean
+          docker system prune -af
           df -h
 
       - name: Checkout repository
@@ -62,7 +63,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          provenance: false   # removes extra attestation manifest, saves space
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # Prune intermediate layers to save space
-          outputs: type=docker
+          # No `outputs:` — push: true already sends directly to registry
