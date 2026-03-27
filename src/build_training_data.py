@@ -122,18 +122,14 @@ def build_training_data(
     synthetic = synthetic.drop_duplicates(subset=["product", "code"])
     logger.info("Synthetic rows after preprocessing + dedup: %d", len(synthetic))
 
-    # --- 8-char code column & filter DDC to synthetic codes ---
+    # --- 8-char code column (used downstream by training) ---
     ddc["code8"] = ddc["code"].str[:8]
     synthetic["code8"] = synthetic["code"].str[:8]
-    synthetic_codes = set(synthetic["code8"])
-    ddc = ddc[ddc["code8"].isin(synthetic_codes)]
-    logger.info("DDC rows after filtering to synthetic codes: %d", len(ddc))
 
-    # --- Balance at level 4 ---
+    # --- Balance at level 4, prioritizing DDC ---
     ddc["code_level4"] = _extract_level4(ddc["code"])
     synthetic["code_level4"] = _extract_level4(synthetic["code"])
 
-    ddc_counts = ddc.groupby("code_level4").size()
     all_level4_codes = set(ddc["code_level4"]) | set(synthetic["code_level4"])
 
     parts: list[pd.DataFrame] = []
@@ -143,15 +139,21 @@ def build_training_data(
         synthetic_subset = synthetic[synthetic["code_level4"] == code_l4]
         n_ddc = len(ddc_subset)
 
-        if n_ddc > max_per_code:
-            # Oversample: random sample DDC, no synthetic
+        if n_ddc >= max_per_code:
+            # DDC alone exceeds cap: sample DDC down, no synthetic needed
             parts.append(ddc_subset.sample(n=max_per_code, random_state=seed))
-        else:
-            # Keep all DDC + all synthetic
-            if n_ddc > 0:
-                parts.append(ddc_subset)
+        elif n_ddc > 0:
+            # DDC exists but below cap: keep all DDC, fill remainder with synthetic
+            parts.append(ddc_subset)
+            remaining = max_per_code - n_ddc
             if len(synthetic_subset) > 0:
-                parts.append(synthetic_subset)
+                n_syn = min(len(synthetic_subset), remaining)
+                parts.append(synthetic_subset.sample(n=n_syn, random_state=seed))
+        else:
+            # No DDC for this code: use synthetic, capped at max_per_code
+            if len(synthetic_subset) > 0:
+                n_to_add = min(len(synthetic_subset), max_per_code)
+                parts.append(synthetic_subset.sample(n=n_to_add, random_state=seed))
 
     result = pd.concat(parts, ignore_index=True)
     result = result.drop(columns=["code_level4"])
