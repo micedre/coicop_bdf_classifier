@@ -64,7 +64,12 @@ def _evaluate_on_annotations(
     import pandas as pd
 
     from .predict import HierarchicalCOICOPPredictor
-    from .topk_accuracy import compute_topk_accuracy, detect_levels, detect_max_k, ensure_true_labels
+    from .topk_accuracy import (
+        compute_topk_accuracy,
+        detect_levels,
+        detect_max_k,
+        ensure_true_labels,
+    )
 
     logger.info(f"Running evaluation on {eval_data_path}...")
 
@@ -93,6 +98,7 @@ def _evaluate_on_annotations(
         )
     elif classifier_type == "multihead":
         from .predict import MultiHeadCOICOPPredictor
+
         predictor = MultiHeadCOICOPPredictor(model_path)
         result_df = predictor.predict_dataframe(
             eval_df,
@@ -101,6 +107,7 @@ def _evaluate_on_annotations(
         )
     elif classifier_type == "basic":
         from .predict import BasicCOICOPPredictor
+
         predictor = BasicCOICOPPredictor(model_path)
         result_df = predictor.predict_dataframe(
             eval_df,
@@ -123,14 +130,18 @@ def _evaluate_on_annotations(
         row = compute_topk_accuracy(result_df, level, ks, max_k)
         for k in ks:
             key = f"top-{k}"
-            if key in row and not (isinstance(row[key], float) and row[key] != row[key]):
+            if key in row and not (
+                isinstance(row[key], float) and row[key] != row[key]
+            ):
                 eval_metrics[f"eval_level{level}_top-{k}"] = row[key]
 
     # Per-filter-column metrics
     if eval_filter_columns:
         for col in eval_filter_columns:
             if col not in result_df.columns:
-                logger.warning(f"Filter column '{col}' not found in eval data, skipping")
+                logger.warning(
+                    f"Filter column '{col}' not found in eval data, skipping"
+                )
                 continue
             for val, label in [(True, "true"), (False, "false")]:
                 subset = result_df[result_df[col].astype(bool) == val]
@@ -142,8 +153,12 @@ def _evaluate_on_annotations(
                     row = compute_topk_accuracy(subset, level, ks, max_k)
                     for k in ks:
                         key = f"top-{k}"
-                        if key in row and not (isinstance(row[key], float) and row[key] != row[key]):
-                            eval_metrics[f"eval_{col}_{label}_level{level}_top-{k}"] = row[key]
+                        if key in row and not (
+                            isinstance(row[key], float) and row[key] != row[key]
+                        ):
+                            eval_metrics[f"eval_{col}_{label}_level{level}_top-{k}"] = (
+                                row[key]
+                            )
                 eval_metrics[f"eval_{col}_{label}_N"] = len(subset)
 
     logger.info(f"Evaluation metrics: {eval_metrics}")
@@ -171,7 +186,9 @@ def _finalize_mlflow_run(
 ) -> None:
     """Run post-training evaluation, log artifacts/pyfunc, and end the MLflow run."""
     if eval_data_path:
-        eval_prediction_type = "greedy" if eval_beam_size <= 1 else f"beam_{eval_beam_size}"
+        eval_prediction_type = (
+            "greedy" if eval_beam_size <= 1 else f"beam_{eval_beam_size}"
+        )
         mlflow.log_param("eval_prediction_type", eval_prediction_type)
         eval_metrics = _evaluate_on_annotations(
             classifier=classifier,
@@ -279,7 +296,13 @@ def train_hierarchical_classifier(
 
     # Load data
     logger.info(f"Loading annotations from {annotations_path}...")
-    df = load_annotations(annotations_path, exclude_technical=True, encryption_key=encryption_key, preprocess=preprocess, code_column=code_column)
+    df = load_annotations(
+        annotations_path,
+        exclude_technical=True,
+        encryption_key=encryption_key,
+        preprocess=preprocess,
+        code_column=code_column,
+    )
     logger.info(f"Loaded {len(df)} samples (excluding 98.x and 99.x codes)")
 
     # Log data statistics
@@ -292,6 +315,7 @@ def train_hierarchical_classifier(
     saved_mlflow_run_id = None
     if resume_from and model_path.exists():
         import pickle
+
         meta_file = model_path / "hierarchical_metadata.pkl"
         if meta_file.exists():
             with open(meta_file, "rb") as f:
@@ -308,12 +332,14 @@ def train_hierarchical_classifier(
         else:
             mlflow.start_run()
         _log_all_params(_all_args)
-        mlflow.log_params({
-            "classifier_type": "hierarchical",
-            "num_samples": len(df),
-            "unique_codes": unique_codes,
-            "unique_level1": unique_level1,
-        })
+        mlflow.log_params(
+            {
+                "classifier_type": "hierarchical",
+                "num_samples": len(df),
+                "unique_codes": unique_codes,
+                "unique_level1": unique_level1,
+            }
+        )
 
         run_id = mlflow.active_run().info.run_id
         mlflow_run_info = {
@@ -360,11 +386,13 @@ def train_hierarchical_classifier(
     # Log metrics to MLflow
     if mlflow_experiment:
         for level_name, level_metrics in metrics.items():
-            mlflow.log_metrics({
-                f"{level_name}_num_classes": level_metrics["num_classes"],
-                f"{level_name}_train_samples": level_metrics["train_samples"],
-                f"{level_name}_val_samples": level_metrics["val_samples"],
-            })
+            mlflow.log_metrics(
+                {
+                    f"{level_name}_num_classes": level_metrics["num_classes"],
+                    f"{level_name}_train_samples": level_metrics["train_samples"],
+                    f"{level_name}_val_samples": level_metrics["val_samples"],
+                }
+            )
 
     # Save the complete classifier (final save with MLflow run_id)
     mlflow_run_id = mlflow.active_run().info.run_id if mlflow_experiment else None
@@ -373,8 +401,15 @@ def train_hierarchical_classifier(
 
     if mlflow_experiment:
         _finalize_mlflow_run(
-            classifier, model_path, "hierarchical", "src/mlflow_model_hierarchical.py",
-            eval_data_path, eval_text_column, eval_top_k, eval_filter_columns, eval_code_column,
+            classifier,
+            model_path,
+            "hierarchical",
+            "src/mlflow_model_hierarchical.py",
+            eval_data_path,
+            eval_text_column,
+            eval_top_k,
+            eval_filter_columns,
+            eval_code_column,
             eval_beam_size,
         )
 
@@ -447,7 +482,13 @@ def fine_tune_hierarchical_classifier(
 
     # Load new data
     logger.info(f"Loading new training data from {annotations_path}...")
-    df = load_annotations(annotations_path, exclude_technical=True, encryption_key=encryption_key, preprocess=preprocess, code_column=code_column)
+    df = load_annotations(
+        annotations_path,
+        exclude_technical=True,
+        encryption_key=encryption_key,
+        preprocess=preprocess,
+        code_column=code_column,
+    )
     logger.info(f"Loaded {len(df)} samples (excluding 98.x and 99.x codes)")
 
     # Log data statistics
@@ -460,12 +501,14 @@ def fine_tune_hierarchical_classifier(
         mlflow.set_experiment(mlflow_experiment)
         mlflow.start_run()
         _log_all_params(_all_args)
-        mlflow.log_params({
-            "classifier_type": "hierarchical",
-            "task": "fine-tuning",
-            "num_samples": len(df),
-            "unique_codes": unique_codes,
-        })
+        mlflow.log_params(
+            {
+                "classifier_type": "hierarchical",
+                "task": "fine-tuning",
+                "num_samples": len(df),
+                "unique_codes": unique_codes,
+            }
+        )
 
         run_id = mlflow.active_run().info.run_id
         mlflow_run_info = {
@@ -495,12 +538,14 @@ def fine_tune_hierarchical_classifier(
     # Log metrics to MLflow
     if mlflow_experiment:
         for level_name, level_metrics in metrics.items():
-            mlflow.log_metrics({
-                f"ft_{level_name}_num_classes": level_metrics["num_classes"],
-                f"ft_{level_name}_train_samples": level_metrics["train_samples"],
-                f"ft_{level_name}_val_samples": level_metrics["val_samples"],
-                f"ft_{level_name}_n_dropped": level_metrics["n_dropped"],
-            })
+            mlflow.log_metrics(
+                {
+                    f"ft_{level_name}_num_classes": level_metrics["num_classes"],
+                    f"ft_{level_name}_train_samples": level_metrics["train_samples"],
+                    f"ft_{level_name}_val_samples": level_metrics["val_samples"],
+                    f"ft_{level_name}_n_dropped": level_metrics["n_dropped"],
+                }
+            )
 
     # Save the fine-tuned model
     ft_model_path = output_path / "hierarchical_model"
@@ -509,8 +554,15 @@ def fine_tune_hierarchical_classifier(
 
     if mlflow_experiment:
         _finalize_mlflow_run(
-            classifier, ft_model_path, "hierarchical", "src/mlflow_model_hierarchical.py",
-            eval_data_path, eval_text_column, eval_top_k, eval_filter_columns, eval_code_column,
+            classifier,
+            ft_model_path,
+            "hierarchical",
+            "src/mlflow_model_hierarchical.py",
+            eval_data_path,
+            eval_text_column,
+            eval_top_k,
+            eval_filter_columns,
+            eval_code_column,
             eval_beam_size,
         )
 
@@ -529,7 +581,8 @@ def train_basic_classifier(
     lr: float = 0.1,
     num_epochs: int = 20,
     patience: int = 5,
-    code_column: str = 'code8',
+    text_column: str = "product",
+    code_column: str = "code8",
     mlflow_experiment: str | None = None,
     eval_data_path: str | None = None,
     eval_top_k: int = 5,
@@ -578,9 +631,10 @@ def train_basic_classifier(
     if preprocess:
         import json
         from .data_preparation import preprocess_text
+
         with open("data/text/stopwords.json", "r", encoding="utf-8") as f:
             stopwords = json.load(f)
-        df = preprocess_text(df, "product", stopwords)
+        df = preprocess_text(df, text_column, stopwords)
     logger.info(f"Loaded {len(df)} samples")
 
     unique_codes = df[code_column].nunique()
@@ -592,11 +646,13 @@ def train_basic_classifier(
         mlflow.set_experiment(mlflow_experiment)
         mlflow.start_run()
         _log_all_params(_all_args)
-        mlflow.log_params({
-            "classifier_type": "basic",
-            "num_samples": len(df),
-            "unique_codes": unique_codes,
-        })
+        mlflow.log_params(
+            {
+                "classifier_type": "basic",
+                "num_samples": len(df),
+                "unique_codes": unique_codes,
+            }
+        )
 
         from .mlflow_utils import make_trainer_params
 
@@ -625,7 +681,7 @@ def train_basic_classifier(
     logger.info("Starting basic classifier training...")
     metrics = classifier.train(
         df=df,
-        text_column="product",
+        text_column=text_column,
         code_column=code_column,
         save_dir=str(output_path / "checkpoints"),
         trainer_params=trainer_params,
@@ -637,16 +693,25 @@ def train_basic_classifier(
     logger.info(f"Model saved to {model_path}")
 
     if mlflow_experiment:
-        mlflow.log_metrics({
-            "num_classes": metrics["num_classes"],
-            "train_samples": metrics["train_samples"],
-            "val_samples": metrics["val_samples"],
-            "dropped_samples": metrics["dropped_samples"],
-        })
+        mlflow.log_metrics(
+            {
+                "num_classes": metrics["num_classes"],
+                "train_samples": metrics["train_samples"],
+                "val_samples": metrics["val_samples"],
+                "dropped_samples": metrics["dropped_samples"],
+            }
+        )
 
         _finalize_mlflow_run(
-            classifier, model_path, "basic", "src/mlflow_model_basic.py",
-            eval_data_path, eval_text_column, eval_top_k, eval_filter_columns, eval_code_column,
+            classifier,
+            model_path,
+            "basic",
+            "src/mlflow_model_basic.py",
+            eval_data_path,
+            eval_text_column,
+            eval_top_k,
+            eval_filter_columns,
+            eval_code_column,
         )
 
     return classifier
@@ -723,7 +788,13 @@ def train_multihead_classifier(
 
     # Load data
     logger.info(f"Loading annotations from {annotations_path}...")
-    df = load_annotations(annotations_path, exclude_technical=True, encryption_key=encryption_key, preprocess=preprocess, code_column=code_column)
+    df = load_annotations(
+        annotations_path,
+        exclude_technical=True,
+        encryption_key=encryption_key,
+        preprocess=preprocess,
+        code_column=code_column,
+    )
     logger.info(f"Loaded {len(df)} samples (excluding 98.x and 99.x codes)")
 
     unique_codes = df[code_column].nunique()
@@ -737,12 +808,14 @@ def train_multihead_classifier(
         mlflow.set_experiment(mlflow_experiment)
         mlflow.start_run()
         _log_all_params(_all_args)
-        mlflow.log_params({
-            "classifier_type": "multihead",
-            "num_samples": len(df),
-            "unique_codes": unique_codes,
-            "unique_level1": unique_level1,
-        })
+        mlflow.log_params(
+            {
+                "classifier_type": "multihead",
+                "num_samples": len(df),
+                "unique_codes": unique_codes,
+                "unique_level1": unique_level1,
+            }
+        )
 
         run_id = mlflow.active_run().info.run_id
         mlflow_run_info = {
@@ -790,11 +863,13 @@ def train_multihead_classifier(
     # Log metrics to MLflow
     if mlflow_experiment:
         for level_name, level_metrics in metrics["levels"].items():
-            mlflow.log_metrics({
-                f"{level_name}_num_classes": level_metrics["num_classes"],
-                f"{level_name}_train_samples": level_metrics["train_samples"],
-                f"{level_name}_val_samples": level_metrics["val_samples"],
-            })
+            mlflow.log_metrics(
+                {
+                    f"{level_name}_num_classes": level_metrics["num_classes"],
+                    f"{level_name}_train_samples": level_metrics["train_samples"],
+                    f"{level_name}_val_samples": level_metrics["val_samples"],
+                }
+            )
 
     # Save the classifier
     mlflow_run_id = mlflow.active_run().info.run_id if mlflow_experiment else None
@@ -803,8 +878,15 @@ def train_multihead_classifier(
 
     if mlflow_experiment:
         _finalize_mlflow_run(
-            classifier, model_path, "multihead", "src/mlflow_model_multihead.py",
-            eval_data_path, eval_text_column, eval_top_k, eval_filter_columns, eval_code_column,
+            classifier,
+            model_path,
+            "multihead",
+            "src/mlflow_model_multihead.py",
+            eval_data_path,
+            eval_text_column,
+            eval_top_k,
+            eval_filter_columns,
+            eval_code_column,
         )
 
     return classifier
@@ -866,6 +948,7 @@ def fine_tune_basic_classifier(
     if preprocess:
         import json
         from .data_preparation import preprocess_text
+
         with open("data/text/stopwords.json", "r", encoding="utf-8") as f:
             stopwords = json.load(f)
         df = preprocess_text(df, "product", stopwords)
@@ -880,12 +963,14 @@ def fine_tune_basic_classifier(
         mlflow.set_experiment(mlflow_experiment)
         mlflow.start_run()
         _log_all_params(_all_args)
-        mlflow.log_params({
-            "classifier_type": "basic",
-            "task": "fine-tuning",
-            "num_samples": len(df),
-            "unique_codes": unique_codes,
-        })
+        mlflow.log_params(
+            {
+                "classifier_type": "basic",
+                "task": "fine-tuning",
+                "num_samples": len(df),
+                "unique_codes": unique_codes,
+            }
+        )
 
         from .mlflow_utils import make_trainer_params
 
@@ -916,17 +1001,24 @@ def fine_tune_basic_classifier(
     logger.info(f"Fine-tuned model saved to {ft_model_path}")
 
     if mlflow_experiment:
-        mlflow.log_metrics({
-            "ft_train_samples": metrics["train_samples"],
-            "ft_val_samples": metrics["val_samples"],
-            "ft_dropped_samples": metrics["dropped_samples"],
-        })
+        mlflow.log_metrics(
+            {
+                "ft_train_samples": metrics["train_samples"],
+                "ft_val_samples": metrics["val_samples"],
+                "ft_dropped_samples": metrics["dropped_samples"],
+            }
+        )
 
         _finalize_mlflow_run(
-            classifier, ft_model_path, "basic", "src/mlflow_model_basic.py",
-            eval_data_path, eval_text_column, eval_top_k, eval_filter_columns, eval_code_column,
+            classifier,
+            ft_model_path,
+            "basic",
+            "src/mlflow_model_basic.py",
+            eval_data_path,
+            eval_text_column,
+            eval_top_k,
+            eval_filter_columns,
+            eval_code_column,
         )
 
     return classifier
-
-

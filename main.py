@@ -93,6 +93,8 @@ def cmd_train_basic(args: argparse.Namespace) -> None:
 
     train_basic_classifier(
         data_path=args.data,
+        code_column=args.code_column,
+        text_column=args.text_column,
         output_dir=args.output,
         ngram_min_n=args.ngram_min,
         ngram_max_n=args.ngram_max,
@@ -187,7 +189,9 @@ def cmd_predict_hierarchical(args: argparse.Namespace) -> None:
             texts = args.texts
 
         predictions = predictor.predict(
-            texts, top_k=args.top_k, confidence_threshold=args.confidence_threshold,
+            texts,
+            top_k=args.top_k,
+            confidence_threshold=args.confidence_threshold,
             beam_size=args.beam_size,
         )
         for pred in predictions:
@@ -198,10 +202,14 @@ def cmd_predict_hierarchical(args: argparse.Namespace) -> None:
             if "levels" in pred:
                 print("Level breakdown:")
                 for level_name, level_data in pred["levels"].items():
-                    print(f"  {level_name}: {level_data['code']} (conf: {level_data['confidence']:.2f})")
+                    print(
+                        f"  {level_name}: {level_data['code']} (conf: {level_data['confidence']:.2f})"
+                    )
                     if "alternatives" in level_data:
                         for i, alt in enumerate(level_data["alternatives"], start=2):
-                            print(f"    top {i}: {alt['code']} (conf: {alt['confidence']:.2f})")
+                            print(
+                                f"    top {i}: {alt['code']} (conf: {alt['confidence']:.2f})"
+                            )
 
 
 def cmd_train_multihead(args: argparse.Namespace) -> None:
@@ -277,10 +285,14 @@ def cmd_predict_multihead(args: argparse.Namespace) -> None:
             if "levels" in pred:
                 print("Level breakdown:")
                 for level_name, level_data in pred["levels"].items():
-                    print(f"  {level_name}: {level_data['code']} (conf: {level_data['confidence']:.2f})")
+                    print(
+                        f"  {level_name}: {level_data['code']} (conf: {level_data['confidence']:.2f})"
+                    )
                     if "alternatives" in level_data:
                         for i, alt in enumerate(level_data["alternatives"], start=2):
-                            print(f"    top {i}: {alt['code']} (conf: {alt['confidence']:.2f})")
+                            print(
+                                f"    top {i}: {alt['code']} (conf: {alt['confidence']:.2f})"
+                            )
 
 
 def cmd_classify_llm(args: argparse.Namespace) -> None:
@@ -345,6 +357,8 @@ def cmd_build_training_data(args: argparse.Namespace) -> None:
 
     build_training_data(
         ddc_path=args.ddc,
+        ddc_text_column=args.ddc_text_column,
+        ddc_code_column=args.ddc_code_column,
         output_path=args.output,
         synthetic_path=args.synthetic,
         max_per_code=args.max_per_code,
@@ -356,7 +370,11 @@ def cmd_build_training_data(args: argparse.Namespace) -> None:
 
 def cmd_evaluate_report(args: argparse.Namespace) -> None:
     """Generate a comprehensive evaluation report on annotated data."""
-    from src.evaluation_report import run_evaluation, format_report, log_metrics_to_mlflow
+    from src.evaluation_report import (
+        run_evaluation,
+        format_report,
+        log_metrics_to_mlflow,
+    )
 
     metrics = run_evaluation(
         model_path=args.model,
@@ -754,6 +772,20 @@ def main() -> int:
         help="Path to training parquet (from build-training-data)",
     )
     train_basic_parser.add_argument(
+        "--code-column",
+        type=str,
+        required=False,
+        default="code8",
+        help="Code column in data",
+    )
+    train_basic_parser.add_argument(
+        "--text-column",
+        type=str,
+        required=False,
+        default="product",
+        help="Text column in data",
+    )
+    train_basic_parser.add_argument(
         "--output",
         type=str,
         default="checkpoints/basic",
@@ -887,6 +919,20 @@ def main() -> int:
         type=str,
         required=True,
         help="Path to new training data (parquet)",
+    )
+    ft_basic_parser.add_argument(
+        "--code-column",
+        type=str,
+        required=False,
+        default="code8",
+        help="Code column in data",
+    )
+    ft_basic_parser.add_argument(
+        "--text-column",
+        type=str,
+        required=False,
+        default="product",
+        help="Text column in data",
     )
     ft_basic_parser.add_argument(
         "--output",
@@ -1406,6 +1452,18 @@ def main() -> int:
         type=str,
         required=True,
         help="Path to DDC parquet file (local, S3, or HTTP URL)",
+    )
+    build_data_parser.add_argument(
+        "--ddc-code-column",
+        type=str,
+        default="coicop_code",
+        help="Code column in ddc",
+    )
+    build_data_parser.add_argument(
+        "--ddc-text-column",
+        type=str,
+        default="description_ean",
+        help="Text column in ddc",
     )
     build_data_parser.add_argument(
         "--output",
