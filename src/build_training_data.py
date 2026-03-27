@@ -39,7 +39,9 @@ def _read_parquet(path: str, encryption_key: str | None = None) -> pd.DataFrame:
         if path.startswith("s3://"):
             _configure_s3(con)
         if encryption_key:
-            con.execute(f"PRAGMA add_parquet_key('encryption_key', '{encryption_key}');")
+            con.execute(
+                f"PRAGMA add_parquet_key('encryption_key', '{encryption_key}');"
+            )
             return con.execute(
                 f"SELECT * FROM read_parquet('{path}', encryption_config={{footer_key: 'encryption_key'}})"
             ).df()
@@ -47,14 +49,18 @@ def _read_parquet(path: str, encryption_key: str | None = None) -> pd.DataFrame:
     return pd.read_parquet(path)
 
 
-def _write_parquet(df: pd.DataFrame, path: str, encryption_key: str | None = None) -> None:
+def _write_parquet(
+    df: pd.DataFrame, path: str, encryption_key: str | None = None
+) -> None:
     """Write DataFrame to parquet on local path or S3 URL."""
     if path.startswith("s3://") or encryption_key:
         con = duckdb.connect()
         if path.startswith("s3://"):
             _configure_s3(con)
         if encryption_key:
-            con.execute(f"PRAGMA add_parquet_key('encryption_key', '{encryption_key}');")
+            con.execute(
+                f"PRAGMA add_parquet_key('encryption_key', '{encryption_key}');"
+            )
         con.register("__output", df)
         copy = f"COPY __output TO '{path}' (FORMAT PARQUET"
         if encryption_key:
@@ -82,6 +88,8 @@ def build_training_data(
     seed: int = 42,
     encryption_key: str | None = None,
     preprocess: bool = True,
+    ddc_text_column: str = "description_ean",
+    ddc_code_column: str = "coicop_code",
 ) -> None:
     """Build a balanced training dataset from DDC and synthetic data.
 
@@ -97,7 +105,7 @@ def build_training_data(
     # --- DDC data ---
     logger.info("Reading DDC data from %s", ddc_path)
     ddc = _read_parquet(ddc_path, encryption_key)
-    ddc = ddc.rename(columns={"description_ean": "product", "coicop_code": "code"})
+    ddc = ddc.rename(columns={ddc_text_column: "product", ddc_code_column: "code"})
     ddc = ddc[["product", "code"]].copy()
     ddc["source"] = "ddc"
 
@@ -110,8 +118,12 @@ def build_training_data(
     # --- Synthetic data ---
     logger.info("Reading synthetic data from %s", synthetic_path)
     synthetic = pd.read_csv(
-        synthetic_path, sep=";", skiprows=1, header=None,
-        usecols=[0, 1], names=["product", "code"],
+        synthetic_path,
+        sep=";",
+        skiprows=1,
+        header=None,
+        usecols=[0, 1],
+        names=["product", "code"],
     )
     synthetic = synthetic[["product", "code"]].copy()
     synthetic["source"] = "synthetic"
