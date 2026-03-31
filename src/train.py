@@ -901,6 +901,7 @@ def fine_tune_basic_classifier(
     batch_size: int | None = None,
     patience: int | None = None,
     code_column: str = "code8",
+    text_column: str = "product",
     mlflow_experiment: str | None = None,
     eval_data_path: str | None = None,
     eval_top_k: int = 5,
@@ -985,7 +986,7 @@ def fine_tune_basic_classifier(
     logger.info("Starting fine-tuning...")
     metrics = classifier.fine_tune(
         df=df,
-        text_column="product",
+        text_column=text_column,
         code_column=code_column,
         save_dir=str(output_path / "checkpoints"),
         trainer_params=trainer_params,

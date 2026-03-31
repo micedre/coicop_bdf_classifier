@@ -125,6 +125,8 @@ def cmd_fine_tune_basic(args: argparse.Namespace) -> None:
         model_path=args.model,
         data_path=args.data,
         output_dir=args.output,
+        code_column=args.code_column,
+        text_column=args.text_column,
         lr=args.lr,
         num_epochs=args.num_epochs,
         batch_size=args.batch_size,
