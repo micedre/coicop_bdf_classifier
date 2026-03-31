@@ -119,14 +119,23 @@ data_ready = {
   load_btn;
   if (!predictions_url?.trim()) return { status: "empty" };
 
-  const url = predictions_url.trim().replace(/'/g, "''");
+  const url = predictions_url.trim();
 
   try {
+    // Télécharger le fichier via fetch pour éviter que DuckDB
+    // n'interprète l'URL comme un chemin S3/Amazon
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} — ${resp.statusText}`);
+    const buf = new Uint8Array(await resp.arrayBuffer());
+
+    // Enregistrer le buffer comme fichier local dans DuckDB WASM
+    await db.db().registerFileBuffer("predictions.parquet", buf);
+
     // Création de la vue enrichie avec tous les champs dérivés
     await db.query(`
       CREATE OR REPLACE VIEW preds AS
       WITH base AS (
-        SELECT * FROM read_parquet('${url}')
+        SELECT * FROM read_parquet('predictions.parquet')
       ),
       leveled AS (
         SELECT *,
