@@ -210,7 +210,7 @@ data_ready = {
     `);
     const topk_available = cols.map(c => c.column_name);
 
-    const test = await db.query("SELECT COUNT(*) AS n FROM preds");
+    const test = await db.query("SELECT CAST(COUNT(*) AS INTEGER) AS n FROM preds");
     return { status: "ok", n: Number(test[0].n), topk_cols: topk_available };
   } catch(e) {
     return { status: "error", message: e.message };
@@ -265,8 +265,8 @@ global_where = {
 
   const stats = await db.query(`
     SELECT
-      COUNT(*) AS n_total,
-      SUM(CASE WHEN is_technical THEN 1 ELSE 0 END) AS n_tech,
+      CAST(COUNT(*) AS INTEGER) AS n_total,
+      CAST(SUM(CASE WHEN is_technical THEN 1 ELSE 0 END) AS INTEGER) AS n_tech,
       AVG(CASE WHEN NOT is_technical AND true_level1 IS NOT NULL
                AND predicted_level1 IS NOT NULL
                AND true_level1 = predicted_level1 THEN 1.0 ELSE 0.0 END) * 100 AS acc_l1,
@@ -310,9 +310,9 @@ global_where = {
     const r = await db.query(`
       SELECT
         ${lvl} AS niveau,
-        COUNT(*) AS n,
+        CAST(COUNT(*) AS INTEGER) AS n,
         AVG(CASE WHEN true_level${lvl} = predicted_level${lvl} THEN 1.0 ELSE 0.0 END) * 100 AS accuracy,
-        COUNT(DISTINCT true_level${lvl}) AS n_classes
+        CAST(COUNT(DISTINCT true_level${lvl}) AS INTEGER) AS n_classes
       FROM preds
       WHERE ${global_where}
         AND true_level${lvl} IS NOT NULL
@@ -413,7 +413,7 @@ global_where = {
   const bins = await db.query(`
     SELECT
       ROUND(confidence_num * 20) / 20 AS conf_bin,
-      COUNT(*) AS n,
+      CAST(COUNT(*) AS INTEGER) AS n,
       AVG(CASE WHEN true_level4 = predicted_level4 THEN 1.0 ELSE 0.0 END) AS acc
     FROM preds
     WHERE ${global_where} AND confidence_num IS NOT NULL AND true_level4 IS NOT NULL
@@ -517,7 +517,7 @@ html`</div>`
   const rows = await db.query(`
     SELECT
       COALESCE(CAST(${dim} AS VARCHAR), 'N/A') AS dim_val,
-      COUNT(*) AS n_total,
+      CAST(COUNT(*) AS INTEGER) AS n_total,
       AVG(CASE WHEN true_level1 IS NOT NULL AND predicted_level1 IS NOT NULL
                AND true_level1 = predicted_level1 THEN 1.0 ELSE 0.0 END) * 100 AS acc_l1,
       AVG(CASE WHEN true_level2 IS NOT NULL AND predicted_level2 IS NOT NULL
@@ -570,7 +570,7 @@ html`</div>`
   const rows = await db.query(`
     SELECT
       COALESCE(CAST(${dim} AS VARCHAR), 'N/A') AS dim_val,
-      COUNT(*) AS n,
+      CAST(COUNT(*) AS INTEGER) AS n,
       AVG(confidence_num) AS mean_conf
     FROM preds
     WHERE ${global_where}
@@ -628,7 +628,7 @@ html`</div>`
   const dim = analysis_dim;
   const heat_data = await db.query(`
     WITH top_vals AS (
-      SELECT COALESCE(CAST(${dim} AS VARCHAR), 'N/A') AS dim_val, COUNT(*) AS n
+      SELECT COALESCE(CAST(${dim} AS VARCHAR), 'N/A') AS dim_val, CAST(COUNT(*) AS INTEGER) AS n
       FROM preds WHERE ${global_where}
       GROUP BY 1 ORDER BY n DESC LIMIT 15
     )
@@ -636,28 +636,28 @@ html`</div>`
       COALESCE(CAST(${dim} AS VARCHAR), 'N/A') AS dim_val,
       1 AS niveau,
       AVG(CASE WHEN true_level1 = predicted_level1 THEN 1.0 ELSE 0.0 END) * 100 AS accuracy,
-      COUNT(*) AS n
+      CAST(COUNT(*) AS INTEGER) AS n
     FROM preds JOIN top_vals ON COALESCE(CAST(${dim} AS VARCHAR), 'N/A') = top_vals.dim_val
     WHERE ${global_where} AND true_level1 IS NOT NULL
     GROUP BY 1, 2
     UNION ALL
     SELECT COALESCE(CAST(${dim} AS VARCHAR), 'N/A'), 2,
       AVG(CASE WHEN true_level2 = predicted_level2 THEN 1.0 ELSE 0.0 END) * 100,
-      COUNT(*)
+      CAST(COUNT(*) AS INTEGER)
     FROM preds JOIN top_vals ON COALESCE(CAST(${dim} AS VARCHAR), 'N/A') = top_vals.dim_val
     WHERE ${global_where} AND true_level2 IS NOT NULL
     GROUP BY 1, 2
     UNION ALL
     SELECT COALESCE(CAST(${dim} AS VARCHAR), 'N/A'), 3,
       AVG(CASE WHEN true_level3 = predicted_level3 THEN 1.0 ELSE 0.0 END) * 100,
-      COUNT(*)
+      CAST(COUNT(*) AS INTEGER)
     FROM preds JOIN top_vals ON COALESCE(CAST(${dim} AS VARCHAR), 'N/A') = top_vals.dim_val
     WHERE ${global_where} AND true_level3 IS NOT NULL
     GROUP BY 1, 2
     UNION ALL
     SELECT COALESCE(CAST(${dim} AS VARCHAR), 'N/A'), 4,
       AVG(CASE WHEN true_level4 = predicted_level4 THEN 1.0 ELSE 0.0 END) * 100,
-      COUNT(*)
+      CAST(COUNT(*) AS INTEGER)
     FROM preds JOIN top_vals ON COALESCE(CAST(${dim} AS VARCHAR), 'N/A') = top_vals.dim_val
     WHERE ${global_where} AND true_level4 IS NOT NULL
     GROUP BY 1, 2
@@ -764,10 +764,10 @@ html`</div>`
 
   const stats = await db.query(`
     SELECT
-      COUNT(*) AS n_total,
-      SUM(CASE WHEN err_l4 THEN 1 ELSE 0 END) AS n_errors,
+      CAST(COUNT(*) AS INTEGER) AS n_total,
+      CAST(SUM(CASE WHEN err_l4 THEN 1 ELSE 0 END) AS INTEGER) AS n_errors,
       AVG(confidence_num) AS mean_conf,
-      COUNT(DISTINCT true_level4) AS n_codes
+      CAST(COUNT(DISTINCT true_level4) AS INTEGER) AS n_codes
     FROM preds
     WHERE ${where_clause} AND true_level4 IS NOT NULL AND predicted_level4 IS NOT NULL
   `);
@@ -932,7 +932,7 @@ error_filter_state = {
   const pairs = await db.query(`
     SELECT
       true_level4 || ' → ' || predicted_level4 AS paire,
-      COUNT(*) AS n
+      CAST(COUNT(*) AS INTEGER) AS n
     FROM preds
     WHERE ${where_clause} AND err_l4 = true
     GROUP BY 1 ORDER BY n DESC LIMIT 15
@@ -960,7 +960,7 @@ error_filter_state = {
   const sev_data = await db.query(`
     SELECT
       COALESCE(error_severity, 'N/A') AS severity,
-      COUNT(*) AS n
+      CAST(COUNT(*) AS INTEGER) AS n
     FROM preds
     WHERE ${where_clause} AND true_level4 IS NOT NULL AND predicted_level4 IS NOT NULL
     GROUP BY 1 ORDER BY n DESC
