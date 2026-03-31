@@ -129,7 +129,7 @@ data_ready = {
     const buf = new Uint8Array(await resp.arrayBuffer());
 
     // Enregistrer le buffer comme fichier local dans DuckDB WASM
-    await db.db().registerFileBuffer("predictions.parquet", buf);
+    await db._db.registerFileBuffer("predictions.parquet", buf);
 
     // Création de la vue enrichie avec tous les champs dérivés
     await db.query(`
