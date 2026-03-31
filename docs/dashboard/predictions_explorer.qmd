@@ -9,6 +9,8 @@ format:
 lang: fr
 ---
 
+# {.sidebar}
+
 ```{ojs}
 //| output: false
 // =============================================================
@@ -36,8 +38,6 @@ fmt_n = d3.format(",")
 fmt_pct = d3.format(".1f")
 fmt_conf = d3.format(".3f")
 ```
-
-# {.sidebar}
 
 ```{ojs}
 // --- CONNEXION ---
