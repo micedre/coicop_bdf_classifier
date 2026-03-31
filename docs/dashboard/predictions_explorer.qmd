@@ -12,30 +12,37 @@ lang: fr
 # {.sidebar}
 
 ```{ojs}
-
-// =============================================================
-// SETUP GLOBAL — partagé entre toutes les pages
-// =============================================================
-
-// Instance DuckDB WASM (une seule, persistante)
+//| output: false
 db = DuckDBClient.of({})
+```
 
-// Palette de couleurs cohérente
-PALETTE = {
+```{ojs}
+//| output: false
+PALETTE = ({
   levels: ["#0d6efd", "#198754", "#ffc107", "#dc3545"],
   severity: {
     "correct":    "#198754",
     "near-miss":  "#8bc34a",
     "L3 faux":    "#ffc107",
     "L2 faux":    "#ff9800",
-    "far-miss":   "#dc3545",
+    "far-miss":   "#dc3545"
   },
   neutral: "#6c757d"
-}
+})
+```
 
-// Formatage nombre avec séparateur de milliers
+```{ojs}
+//| output: false
 fmt_n = d3.format(",")
+```
+
+```{ojs}
+//| output: false
 fmt_pct = d3.format(".1f")
+```
+
+```{ojs}
+//| output: false
 fmt_conf = d3.format(".3f")
 ```
 
