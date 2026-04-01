@@ -11,33 +11,6 @@ lang: fr
 
 ```{ojs}
 //| output: false
-
-/* ================================================================
-   GLOBAL DEFINITIONS — available to ALL pages
-   ================================================================ */
-
-db = DuckDBClient.of({})
-
-PALETTE = ({
-  levels: ["#4361ee", "#2ec4b6", "#f77f00", "#d62828"],
-  severity: {
-    "correct":    "#2ec4b6",
-    "near-miss":  "#8bc34a",
-    "L3 faux":    "#f77f00",
-    "L2 faux":    "#ff6b35",
-    "far-miss":   "#d62828"
-  },
-  neutral: "#8d99ae"
-})
-
-fmt_n   = d3.format(",")
-fmt_pct = d3.format(".1f")
-fmt_conf = d3.format(".3f")
-```
-
-```{ojs}
-//| output: false
-
 /* Custom CSS injected once */
 html`<style>
   /* General dashboard readability */
@@ -156,6 +129,18 @@ html`<style>
 # {.sidebar}
 
 ```{ojs}
+//| output: false
+db = DuckDBClient.of({})
+```
+
+```{ojs}
+//| output: false
+fmt_n   = d3.format(",")
+fmt_pct = d3.format(".1f")
+fmt_conf = d3.format(".3f")
+```
+
+```{ojs}
 html`<h5 style="margin:0 0 .4rem; color:#4361ee; font-weight:700">Fichier de predictions</h5>`
 
 viewof predictions_url = Inputs.text({
@@ -174,14 +159,14 @@ viewof load_btn = Inputs.button("Charger les donnees", {
 {
   load_btn;
   if (!predictions_url?.trim())
-    return html`<span style="color:${PALETTE.neutral}; font-size:.82em">En attente d'une URL</span>`
+    return html`<span style="color:#8d99ae; font-size:.82em">En attente d'une URL</span>`
   if (data_ready?.status === "loading")
     return html`<span style="color:#f77f00; font-size:.82em">Chargement…</span>`
   if (data_ready?.status === "error")
     return html`<span style="color:#d62828; font-size:.82em">Erreur : ${data_ready.message?.slice(0,80)}</span>`
   if (data_ready?.status === "ok")
     return html`<span style="color:#2ec4b6; font-size:.82em">${fmt_n(data_ready.n)} observations chargees</span>`
-  return html`<span style="color:${PALETTE.neutral}; font-size:.82em">Inactif</span>`
+  return html`<span style="color:#8d99ae; font-size:.82em">Inactif</span>`
 }
 ```
 
@@ -358,7 +343,7 @@ global_where = {
 ```{ojs}
 {
   if (data_ready?.status !== "ok") {
-    return html`<div style="color:${PALETTE.neutral}; padding:1.5rem; text-align:center">
+    return html`<div style="color:#8d99ae; padding:1.5rem; text-align:center">
       Chargez un fichier parquet pour afficher les metriques.
     </div>`
   }
@@ -401,7 +386,7 @@ global_where = {
 
 ```{ojs}
 {
-  if (data_ready?.status !== "ok") return html`<p style="color:${PALETTE.neutral}">…</p>`
+  if (data_ready?.status !== "ok") return html`<p style="color:#8d99ae">…</p>`
 
   const rows = [];
   for (const lvl of [1,2,3,4]) {
@@ -456,7 +441,7 @@ global_where = {
 
 ```{ojs}
 {
-  if (data_ready?.status !== "ok") return html`<p style="color:${PALETTE.neutral}">…</p>`
+  if (data_ready?.status !== "ok") return html`<p style="color:#8d99ae">…</p>`
 
   const topk_cols = data_ready?.topk_cols ?? [];
   const topk_data = [];
@@ -517,7 +502,7 @@ global_where = {
 
 ```{ojs}
 {
-  if (data_ready?.status !== "ok") return html`<p style="color:${PALETTE.neutral}">…</p>`
+  if (data_ready?.status !== "ok") return html`<p style="color:#8d99ae">…</p>`
 
   const bins = await db.query(`
     SELECT
@@ -555,7 +540,7 @@ global_where = {
 
 ```{ojs}
 {
-  if (data_ready?.status !== "ok") return html`<p style="color:${PALETTE.neutral}">…</p>`
+  if (data_ready?.status !== "ok") return html`<p style="color:#8d99ae">…</p>`
 
   const tdata = await db.query(`
     WITH base AS (
@@ -638,7 +623,7 @@ viewof analysis_dim = Inputs.select(
 
 ```{ojs}
 {
-  if (data_ready?.status !== "ok") return html`<p style="color:${PALETTE.neutral}">Chargez un fichier.</p>`
+  if (data_ready?.status !== "ok") return html`<p style="color:#8d99ae">Chargez un fichier.</p>`
 
   const dim = analysis_dim;
   const rows = await db.query(`
@@ -695,7 +680,7 @@ viewof analysis_dim = Inputs.select(
 
 ```{ojs}
 {
-  if (data_ready?.status !== "ok") return html`<p style="color:${PALETTE.neutral}">…</p>`
+  if (data_ready?.status !== "ok") return html`<p style="color:#8d99ae">…</p>`
 
   const dim = analysis_dim;
   const rows = await db.query(`
@@ -768,7 +753,7 @@ viewof analysis_dim = Inputs.select(
 
 ```{ojs}
 {
-  if (data_ready?.status !== "ok") return html`<p style="color:${PALETTE.neutral}">…</p>`
+  if (data_ready?.status !== "ok") return html`<p style="color:#8d99ae">…</p>`
 
   const dim = analysis_dim;
   const heat_data = await db.query(`
@@ -906,7 +891,7 @@ html`</div>`
 
 ```{ojs}
 {
-  if (data_ready?.status !== "ok") return html`<p style="color:${PALETTE.neutral}">…</p>`
+  if (data_ready?.status !== "ok") return html`<p style="color:#8d99ae">…</p>`
 
   const { where_clause } = error_filter_state;
 
@@ -990,7 +975,7 @@ error_filter_state = {
 ```{ojs}
 {
   if (data_ready?.status !== "ok")
-    return html`<p style="color:${PALETTE.neutral}">Chargez un fichier pour explorer les erreurs.</p>`
+    return html`<p style="color:#8d99ae">Chargez un fichier pour explorer les erreurs.</p>`
 
   const { where_clause } = error_filter_state;
 
@@ -1011,7 +996,7 @@ error_filter_state = {
   `);
 
   if (rows.length === 0)
-    return html`<p style="color:${PALETTE.neutral}; text-align:center; padding:2rem">Aucun resultat pour ces criteres.</p>`;
+    return html`<p style="color:#8d99ae; text-align:center; padding:2rem">Aucun resultat pour ces criteres.</p>`;
 
   const sevClass = {
     "correct": "sev-correct", "near-miss": "sev-nearmiss",
@@ -1040,15 +1025,15 @@ error_filter_state = {
                   color:${r.severite === 'correct' ? '#2d6a4f' : '#c62828'}">${r.pred_l4}</span></td>
               <td style="text-align:right; font-variant-numeric:tabular-nums; font-weight:600">${r.conf_pct}%</td>
               <td><span style="font-size:.78em; padding:.15rem .4rem; border-radius:4px;
-                  background:${PALETTE.severity[r.severite] || PALETTE.neutral}22;
-                  color:${PALETTE.severity[r.severite] || PALETTE.neutral}">${r.severite ?? '–'}</span></td>
+                  background:${{correct:"#2ec4b6","near-miss":"#8bc34a","L3 faux":"#f77f00","L2 faux":"#ff6b35","far-miss":"#d62828"}[r.severite] || "#8d99ae"}22;
+                  color:${{correct:"#2ec4b6","near-miss":"#8bc34a","L3 faux":"#f77f00","L2 faux":"#ff6b35","far-miss":"#d62828"}[r.severite] || "#8d99ae"}">${r.severite ?? '–'}</span></td>
               <td style="font-size:.82em">${r.source}</td>
               <td style="font-size:.82em">${r.annee}</td>
             </tr>`
           )}
         </tbody>
       </table>
-      ${rows.length === 500 ? html`<p style="color:${PALETTE.neutral}; text-align:center; font-size:.8em; padding:.5rem">
+      ${rows.length === 500 ? html`<p style="color:#8d99ae; text-align:center; font-size:.8em; padding:.5rem">
         Affichage limite a 500 resultats — affinez les filtres pour voir plus.</p>` : ''}
     </div>`;
 
@@ -1079,7 +1064,7 @@ error_filter_state = {
 
 ```{ojs}
 {
-  if (data_ready?.status !== "ok") return html`<p style="color:${PALETTE.neutral}">…</p>`
+  if (data_ready?.status !== "ok") return html`<p style="color:#8d99ae">…</p>`
 
   const { where_clause } = error_filter_state;
 
@@ -1093,7 +1078,7 @@ error_filter_state = {
   `);
 
   const confusion_chart = pairs.length === 0
-    ? html`<p style="color:${PALETTE.neutral}; font-size:.85em">Aucune erreur avec ces filtres.</p>`
+    ? html`<p style="color:#8d99ae; font-size:.85em">Aucune erreur avec ces filtres.</p>`
     : Plot.plot({
         height: 240,
         marginLeft: 170,
@@ -1291,10 +1276,10 @@ safe
 ```{ojs}
 {
   if (!inspect_model_btn)
-    return html`<p style="color:${PALETTE.neutral}">Renseignez l'URL du modele et cliquez sur Inspecter.</p>`;
+    return html`<p style="color:#8d99ae">Renseignez l'URL du modele et cliquez sur Inspecter.</p>`;
 
   if (!model_metadata)
-    return html`<p style="color:${PALETTE.neutral}">Chargement en cours…</p>`;
+    return html`<p style="color:#8d99ae">Chargement en cours…</p>`;
 
   if (model_metadata.error)
     return html`<div style="background:#fce4ec; color:#c62828; padding:.8rem 1rem; border-radius:8px; font-size:.88em">${model_metadata.error}</div>`;
@@ -1307,7 +1292,7 @@ safe
     basic: { label: "Classifieur Plat", color: "#4361ee" },
     hierarchical: { label: "Classifieur Hierarchique", color: "#2ec4b6" },
     multihead: { label: "Classifieur Multi-tete", color: "#6c63ff" }
-  }[modelType] || { label: modelType, color: PALETTE.neutral };
+  }[modelType] || { label: modelType, color: "#8d99ae" };
 
   // Separate config params from other scalar params
   const configKeys = meta._config_keys ?? [];
@@ -1325,7 +1310,7 @@ safe
       <span style="background:${typeBadge.color}; color:white; padding:.3rem .8rem; border-radius:6px; font-weight:700; font-size:.85em">
         ${typeBadge.label}
       </span>
-      <code style="font-size:.8em; color:${PALETTE.neutral}">${model_metadata.metadata_file}</code>
+      <code style="font-size:.8em; color:#8d99ae">${model_metadata.metadata_file}</code>
     </div>
 
     <div class="section-title">Configuration du modele</div>
@@ -1362,8 +1347,8 @@ safe
 {
   if (!model_metadata?.metadata) {
     if (inspect_model_btn)
-      return html`<p style="color:${PALETTE.neutral}; font-size:.88em">Inspectez un modele pour voir ses codes.</p>`;
-    return html`<p style="color:${PALETTE.neutral}; font-size:.88em">En attente d'une inspection.</p>`;
+      return html`<p style="color:#8d99ae; font-size:.88em">Inspectez un modele pour voir ses codes.</p>`;
+    return html`<p style="color:#8d99ae; font-size:.88em">En attente d'une inspection.</p>`;
   }
 
   const m = model_metadata.metadata;
@@ -1441,12 +1426,12 @@ safe
       <div style="font-size:.8em; max-height:350px; overflow-y:auto; line-height:2">
         ${basicCodes.map(c => html`<span class="code-badge" style="margin:.15rem">${c}</span>`)}
         ${basicCount && basicCount > basicCodes.length
-          ? html`<span style="color:${PALETTE.neutral}; font-size:.9em"> … et ${basicCount - basicCodes.length} autres</span>`
+          ? html`<span style="color:#8d99ae; font-size:.9em"> … et ${basicCount - basicCodes.length} autres</span>`
           : ""}
       </div>
     `;
   } else {
-    content = html`<p style="color:${PALETTE.neutral}; font-size:.85em">Aucune information sur les codes trouvee dans les metadonnees.</p>`;
+    content = html`<p style="color:#8d99ae; font-size:.85em">Aucune information sur les codes trouvee dans les metadonnees.</p>`;
   }
 
   return content;
