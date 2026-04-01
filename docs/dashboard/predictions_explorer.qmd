@@ -9,46 +9,154 @@ format:
 lang: fr
 ---
 
-# {.sidebar}
-
 ```{ojs}
 //| output: false
+
+/* ================================================================
+   GLOBAL DEFINITIONS — available to ALL pages
+   ================================================================ */
+
 db = DuckDBClient.of({})
-```
 
-```{ojs}
-//| output: false
 PALETTE = ({
-  levels: ["#0d6efd", "#198754", "#ffc107", "#dc3545"],
+  levels: ["#4361ee", "#2ec4b6", "#f77f00", "#d62828"],
   severity: {
-    "correct":    "#198754",
+    "correct":    "#2ec4b6",
     "near-miss":  "#8bc34a",
-    "L3 faux":    "#ffc107",
-    "L2 faux":    "#ff9800",
-    "far-miss":   "#dc3545"
+    "L3 faux":    "#f77f00",
+    "L2 faux":    "#ff6b35",
+    "far-miss":   "#d62828"
   },
-  neutral: "#6c757d"
+  neutral: "#8d99ae"
 })
-```
 
-```{ojs}
-//| output: false
-fmt_n = d3.format(",")
-```
-
-```{ojs}
-//| output: false
+fmt_n   = d3.format(",")
 fmt_pct = d3.format(".1f")
-```
-
-```{ojs}
-//| output: false
 fmt_conf = d3.format(".3f")
 ```
 
 ```{ojs}
-// --- CONNEXION ---
-html`<h5 style="margin:0 0 .5rem; color:#0d6efd">📁 Fichier de prédictions</h5>`
+//| output: false
+
+/* Custom CSS injected once */
+html`<style>
+  /* General dashboard readability */
+  .dashboard-page { font-family: "Inter", system-ui, sans-serif; }
+
+  /* Metric cards */
+  .metric-card {
+    border-radius: 10px;
+    padding: 1rem 0.75rem;
+    text-align: center;
+    color: white;
+    box-shadow: 0 2px 8px rgba(0,0,0,.10);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .metric-card .value {
+    font-size: 1.7em;
+    font-weight: 800;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+  }
+  .metric-card .label {
+    font-size: 0.78em;
+    opacity: 0.92;
+    margin-top: 0.2rem;
+  }
+
+  /* Tables */
+  .dash-table {
+    font-size: 0.85em;
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  .dash-table thead th {
+    background: #f1f3f5;
+    font-weight: 600;
+    font-size: 0.8em;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #495057;
+    padding: 0.55rem 0.6rem;
+    border-bottom: 2px solid #dee2e6;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  .dash-table tbody td {
+    padding: 0.45rem 0.6rem;
+    border-bottom: 1px solid #f1f3f5;
+    vertical-align: middle;
+  }
+  .dash-table tbody tr:hover {
+    background: #e8f4fd !important;
+  }
+
+  /* Section titles inside cards */
+  .section-title {
+    font-size: 0.82em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #6c757d;
+    margin-bottom: 0.8rem;
+    padding-bottom: 0.3rem;
+    border-bottom: 2px solid #e9ecef;
+  }
+
+  /* Progress bars */
+  .acc-bar-bg {
+    background: #e9ecef;
+    border-radius: 6px;
+    height: 10px;
+    overflow: hidden;
+  }
+  .acc-bar-fill { height: 100%; border-radius: 6px; transition: width 0.3s; }
+
+  /* Sidebar tweaks */
+  .sidebar h5, .sidebar h6 { font-size: 0.85em !important; }
+  .sidebar hr { margin: 0.6rem 0; border-color: #e9ecef; }
+
+  /* Filter pills */
+  .filter-stat {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 20px;
+    font-size: 0.8em;
+    font-weight: 600;
+  }
+
+  /* Error explorer table row colors */
+  .sev-correct   { background: #d8f3dc !important; }
+  .sev-nearmiss  { background: #e8f5e9 !important; }
+  .sev-l3faux    { background: #fff8e1 !important; }
+  .sev-l2faux    { background: #fff3e0 !important; }
+  .sev-farmiss   { background: #fce4ec !important; }
+
+  /* Code badges */
+  .code-badge {
+    display: inline-block;
+    font-family: monospace;
+    font-size: 0.82em;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    background: #f1f3f5;
+    color: #212529;
+  }
+</style>`
+```
+
+
+# {.sidebar}
+
+```{ojs}
+html`<h5 style="margin:0 0 .4rem; color:#4361ee; font-weight:700">Fichier de predictions</h5>`
 
 viewof predictions_url = Inputs.text({
   label: "URL HTTPS ou S3 (parquet)",
@@ -56,38 +164,33 @@ viewof predictions_url = Inputs.text({
   value: ""
 })
 
-viewof load_btn = Inputs.button("⟳ Charger les données", {
+viewof load_btn = Inputs.button("Charger les donnees", {
   value: 0,
   reduce: (v) => v + 1
 })
 ```
 
 ```{ojs}
-// Indicateur de statut
 {
-  load_btn; // dépendance réactive
-  if (!predictions_url?.trim()) {
-    return html`<span style="color:#6c757d; font-size:.85em">⬤ En attente d'une URL</span>`
-  }
-  if (data_ready?.status === "loading") {
-    return html`<span style="color:#ffc107; font-size:.85em">⬤ Chargement…</span>`
-  }
-  if (data_ready?.status === "error") {
-    return html`<span style="color:#dc3545; font-size:.85em">⬤ Erreur : ${data_ready.message?.slice(0,80)}</span>`
-  }
-  if (data_ready?.status === "ok") {
-    return html`<span style="color:#198754; font-size:.85em">⬤ ${fmt_n(data_ready.n)} observations chargées</span>`
-  }
-  return html`<span style="color:#6c757d; font-size:.85em">⬤ Inactif</span>`
+  load_btn;
+  if (!predictions_url?.trim())
+    return html`<span style="color:${PALETTE.neutral}; font-size:.82em">En attente d'une URL</span>`
+  if (data_ready?.status === "loading")
+    return html`<span style="color:#f77f00; font-size:.82em">Chargement…</span>`
+  if (data_ready?.status === "error")
+    return html`<span style="color:#d62828; font-size:.82em">Erreur : ${data_ready.message?.slice(0,80)}</span>`
+  if (data_ready?.status === "ok")
+    return html`<span style="color:#2ec4b6; font-size:.82em">${fmt_n(data_ready.n)} observations chargees</span>`
+  return html`<span style="color:${PALETTE.neutral}; font-size:.82em">Inactif</span>`
 }
 ```
 
 ```{ojs}
-html`<hr style="margin:.75rem 0">`
-html`<h6 style="color:#495057">🔍 Filtres globaux</h6>`
+html`<hr>`
+html`<h6 style="color:#495057; font-weight:700">Filtres globaux</h6>`
 
 viewof global_exclude_tech = Inputs.toggle({
-  label: "Exclure codes 98/99 (techniques)",
+  label: "Exclure codes 98/99",
   value: true
 })
 
@@ -98,22 +201,25 @@ viewof global_source = Inputs.select(
 
 viewof global_year = Inputs.select(
   available_years,
-  { label: "Année", value: "Toutes" }
+  { label: "Annee", value: "Toutes" }
 )
 
 viewof global_conf_min = Inputs.range([0, 1], {
-  label: "Confiance minimale",
+  label: "Confiance min.",
   step: 0.05,
   value: 0
 })
 ```
 
+
 # Vue d'ensemble
 
 ```{ojs}
-// =============================================================
-// CHARGEMENT DES DONNÉES + VUE PRINCIPALE
-// =============================================================
+//| output: false
+
+/* ================================================================
+   DATA LOADING
+   ================================================================ */
 
 data_ready = {
   load_btn;
@@ -122,16 +228,12 @@ data_ready = {
   const url = predictions_url.trim();
 
   try {
-    // Télécharger le fichier via fetch pour éviter que DuckDB
-    // n'interprète l'URL comme un chemin S3/Amazon
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`HTTP ${resp.status} — ${resp.statusText}`);
     const buf = new Uint8Array(await resp.arrayBuffer());
 
-    // Enregistrer le buffer comme fichier local dans DuckDB WASM
     await db._db.registerFileBuffer("predictions.parquet", buf);
 
-    // Création de la vue enrichie avec tous les champs dérivés
     await db.query(`
       CREATE OR REPLACE VIEW preds AS
       WITH base AS (
@@ -193,7 +295,7 @@ data_ready = {
             WHEN TRY_CAST(budget AS DOUBLE) BETWEEN 10 AND 20  THEN '10-20 €'
             WHEN TRY_CAST(budget AS DOUBLE) BETWEEN 20 AND 50  THEN '20-50 €'
             WHEN TRY_CAST(budget AS DOUBLE) BETWEEN 50 AND 100 THEN '50-100 €'
-            WHEN TRY_CAST(budget AS DOUBLE) > 100              THEN '100 €+'
+            WHEN TRY_CAST(budget AS DOUBLE) > 100              THEN '100+ €'
             ELSE NULL
           END AS budget_tranche
         FROM leveled
@@ -201,7 +303,6 @@ data_ready = {
       SELECT * FROM with_errors
     `);
 
-    // Détecter les colonnes top-k disponibles
     const cols = await db.query(`
       SELECT column_name FROM information_schema.columns
       WHERE table_name = 'preds'
@@ -217,7 +318,6 @@ data_ready = {
   }
 }
 
-// Options des filtres dynamiques (se peuplent après chargement)
 available_sources = {
   if (data_ready?.status !== "ok") return ["Toutes"];
   const rows = await db.query(`
@@ -243,7 +343,6 @@ available_shop_types = {
   return ["Tous", ...rows.map(r => r.shop_type_name)];
 }
 
-// Construction du WHERE clause global réutilisé dans toutes les pages
 global_where = {
   const parts = ["1=1"];
   if (global_exclude_tech) parts.push("NOT is_technical");
@@ -254,13 +353,14 @@ global_where = {
 }
 ```
 
-## Row {height="140px"}
+## Row {height="130px"}
 
 ```{ojs}
-// --- Métriques globales (cartes de valeur) ---
 {
   if (data_ready?.status !== "ok") {
-    return html`<div class="text-muted p-3">Chargez un fichier pour voir les métriques.</div>`
+    return html`<div style="color:${PALETTE.neutral}; padding:1.5rem; text-align:center">
+      Chargez un fichier parquet pour afficher les metriques.
+    </div>`
   }
 
   const stats = await db.query(`
@@ -279,20 +379,18 @@ global_where = {
   `);
   const s = stats[0];
 
-  const card = (val, lbl, color, icon) => html`
-    <div class="card text-bg-${color} h-100">
-      <div class="card-body text-center py-2">
-        <div style="font-size:1.6em; font-weight:700; line-height:1.1">${val}</div>
-        <div style="font-size:.8em; opacity:.9">${icon} ${lbl}</div>
-      </div>
+  const card = (val, lbl, bg) => html`
+    <div class="metric-card" style="background:${bg}">
+      <div class="value">${val}</div>
+      <div class="label">${lbl}</div>
     </div>`;
 
-  return html`<div class="row g-2 h-100">
-    <div class="col">${card(fmt_n(s.n_total), "Observations", "primary", "📦")}</div>
-    <div class="col">${card(fmt_pct(s.n_tech / s.n_total * 100) + "%", "Codes 98/99", "secondary", "⚠️")}</div>
-    <div class="col">${card(fmt_pct(s.acc_l1) + "%", "Accuracy Niveau 1", s.acc_l1 >= 90 ? "success" : s.acc_l1 >= 70 ? "warning" : "danger", "🎯")}</div>
-    <div class="col">${card(fmt_pct(s.acc_l4) + "%", "Accuracy Niveau 4", s.acc_l4 >= 80 ? "success" : s.acc_l4 >= 60 ? "warning" : "danger", "🎯")}</div>
-    <div class="col">${card(fmt_conf(s.mean_conf ?? 0), "Confiance moyenne", "info", "📊")}</div>
+  return html`<div style="display:grid; grid-template-columns:repeat(5,1fr); gap:.6rem; height:100%">
+    ${card(fmt_n(s.n_total), "Observations", "#4361ee")}
+    ${card(fmt_pct(s.n_tech / s.n_total * 100) + "%", "Codes techniques 98/99", "#8d99ae")}
+    ${card(fmt_pct(s.acc_l1) + "%", "Accuracy Niveau 1", s.acc_l1 >= 90 ? "#2ec4b6" : s.acc_l1 >= 70 ? "#f77f00" : "#d62828")}
+    ${card(fmt_pct(s.acc_l4) + "%", "Accuracy Niveau 4", s.acc_l4 >= 80 ? "#2ec4b6" : s.acc_l4 >= 60 ? "#f77f00" : "#d62828")}
+    ${card(fmt_conf(s.mean_conf ?? 0), "Confiance moyenne", "#6c63ff")}
   </div>`;
 }
 ```
@@ -303,7 +401,7 @@ global_where = {
 
 ```{ojs}
 {
-  if (data_ready?.status !== "ok") return html`<p class="text-muted">…</p>`
+  if (data_ready?.status !== "ok") return html`<p style="color:${PALETTE.neutral}">…</p>`
 
   const rows = [];
   for (const lvl of [1,2,3,4]) {
@@ -321,25 +419,30 @@ global_where = {
     if (r.length) rows.push(r[0]);
   }
 
+  const levelColors = ["#4361ee", "#2ec4b6", "#f77f00", "#d62828"];
+
   return html`
-    <table class="table table-sm table-striped" style="font-size:.9em">
+    <div class="section-title">Performance par niveau hierarchique</div>
+    <table class="dash-table">
       <thead><tr>
-        <th>Niveau</th><th class="text-end">N obs.</th>
-        <th class="text-end">Classes</th><th class="text-end">Accuracy</th>
-        <th style="width:120px">Barre</th>
+        <th>Niveau</th>
+        <th style="text-align:right">Observations</th>
+        <th style="text-align:right">Classes</th>
+        <th style="text-align:right">Accuracy</th>
+        <th style="width:140px"></th>
       </tr></thead>
       <tbody>
-      ${rows.map(r => {
+      ${rows.map((r, i) => {
         const acc = Number(r.accuracy ?? 0);
-        const color = acc >= 85 ? "#198754" : acc >= 65 ? "#ffc107" : "#dc3545";
+        const color = levelColors[i] || "#4361ee";
         return html`<tr>
-          <td><strong>Niveau ${r.niveau}</strong></td>
-          <td class="text-end">${fmt_n(r.n)}</td>
-          <td class="text-end">${r.n_classes}</td>
-          <td class="text-end"><strong style="color:${color}">${fmt_pct(acc)}%</strong></td>
+          <td><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:${color}; margin-right:.4rem"></span><strong>Niveau ${r.niveau}</strong></td>
+          <td style="text-align:right; font-variant-numeric:tabular-nums">${fmt_n(r.n)}</td>
+          <td style="text-align:right; font-variant-numeric:tabular-nums">${r.n_classes}</td>
+          <td style="text-align:right"><strong style="font-variant-numeric:tabular-nums">${fmt_pct(acc)}%</strong></td>
           <td>
-            <div style="background:#e9ecef; border-radius:3px; height:12px; overflow:hidden">
-              <div style="width:${acc}%; background:${color}; height:100%"></div>
+            <div class="acc-bar-bg">
+              <div class="acc-bar-fill" style="width:${acc}%; background:${color}"></div>
             </div>
           </td>
         </tr>`;
@@ -353,9 +456,8 @@ global_where = {
 
 ```{ojs}
 {
-  if (data_ready?.status !== "ok") return html`<p class="text-muted">…</p>`
+  if (data_ready?.status !== "ok") return html`<p style="color:${PALETTE.neutral}">…</p>`
 
-  // Construire les conditions top-k disponibles
   const topk_cols = data_ready?.topk_cols ?? [];
   const topk_data = [];
 
@@ -376,26 +478,33 @@ global_where = {
   }
 
   return Plot.plot({
-    height: 240,
-    marginLeft: 50,
+    height: 260,
+    marginLeft: 55,
+    marginBottom: 40,
+    style: { fontSize: "12px" },
     x: { label: "k (top-k)", tickFormat: d => `${d}` },
-    y: { label: "Accuracy (%)", domain: [0, 100] },
+    y: { label: "Accuracy (%)", domain: [0, 100], grid: true },
     marks: [
+      Plot.ruleY([0]),
+      Plot.areaY(topk_data, {
+        x: "k", y: "accuracy",
+        fill: "#4361ee", fillOpacity: 0.08
+      }),
       Plot.line(topk_data, {
         x: "k", y: "accuracy",
-        stroke: "#0d6efd", strokeWidth: 2.5
+        stroke: "#4361ee", strokeWidth: 2.5
       }),
       Plot.dot(topk_data, {
         x: "k", y: "accuracy",
-        fill: d => d.available > 1 ? "#0d6efd" : "#adb5bd",
-        r: 5,
+        fill: d => d.available > 1 ? "#4361ee" : "#adb5bd",
+        r: 5, stroke: "white", strokeWidth: 1.5,
         tip: true,
         title: d => `Top-${d.k} : ${fmt_pct(d.accuracy)}%`
       }),
       Plot.text(topk_data.filter(d => [1,3,5,10].includes(d.k)), {
         x: "k", y: "accuracy",
         text: d => `${fmt_pct(d.accuracy)}%`,
-        dy: -12, fontSize: 11, fill: "#0d6efd"
+        dy: -14, fontSize: 11, fill: "#4361ee", fontWeight: "600"
       })
     ]
   });
@@ -408,7 +517,7 @@ global_where = {
 
 ```{ojs}
 {
-  if (data_ready?.status !== "ok") return html`<p class="text-muted">…</p>`
+  if (data_ready?.status !== "ok") return html`<p style="color:${PALETTE.neutral}">…</p>`
 
   const bins = await db.query(`
     SELECT
@@ -421,19 +530,21 @@ global_where = {
   `);
 
   return Plot.plot({
-    height: 220,
-    marginLeft: 50,
+    height: 240,
+    marginLeft: 55,
+    marginBottom: 40,
+    style: { fontSize: "12px" },
     x: { label: "Score de confiance", domain: [0, 1] },
-    y: { label: "Nombre d'observations" },
-    color: { legend: true },
+    y: { label: "Nombre d'observations", grid: true },
     marks: [
       Plot.rectY(bins, {
         x1: d => d.conf_bin - 0.025,
         x2: d => d.conf_bin + 0.025,
         y: "n",
-        fill: d => d.acc >= 0.9 ? "#198754" : d.acc >= 0.7 ? "#ffc107" : "#dc3545",
+        fill: d => d.acc >= 0.9 ? "#2ec4b6" : d.acc >= 0.7 ? "#f77f00" : "#d62828",
+        rx: 2,
         tip: true,
-        title: d => `Confiance ≈ ${fmt_pct(d.conf_bin * 100)}%\nN = ${fmt_n(d.n)}\nAccuracy = ${fmt_pct(d.acc * 100)}%`
+        title: d => `Confiance ~ ${fmt_pct(d.conf_bin * 100)}%\nN = ${fmt_n(d.n)}\nAccuracy = ${fmt_pct(d.acc * 100)}%`
       })
     ]
   });
@@ -444,7 +555,7 @@ global_where = {
 
 ```{ojs}
 {
-  if (data_ready?.status !== "ok") return html`<p class="text-muted">…</p>`
+  if (data_ready?.status !== "ok") return html`<p style="color:${PALETTE.neutral}">…</p>`
 
   const tdata = await db.query(`
     WITH base AS (
@@ -470,39 +581,55 @@ global_where = {
   `);
 
   return Plot.plot({
-    height: 220,
-    marginLeft: 50,
+    height: 240,
+    marginLeft: 55,
+    marginBottom: 40,
+    style: { fontSize: "12px" },
     x: { label: "Seuil de confiance", domain: [0, 1] },
-    y: { label: "(%)", domain: [0, 100] },
-    color: { legend: true, domain: ["Couverture", "Accuracy"], range: ["#ff9800", "#0d6efd"] },
+    y: { label: "(%)", domain: [0, 100], grid: true },
+    color: {
+      legend: true,
+      domain: ["Couverture", "Accuracy"],
+      range: ["#ff6b35", "#4361ee"]
+    },
     marks: [
-      Plot.line(tdata, { x: "seuil", y: d => d.couverture * 100, stroke: "#ff9800", strokeWidth: 2 }),
-      Plot.line(tdata, { x: "seuil", y: d => d.accuracy * 100, stroke: "#0d6efd", strokeWidth: 2 }),
+      Plot.areaY(tdata, {
+        x: "seuil", y: d => d.couverture * 100,
+        fill: "#ff6b35", fillOpacity: 0.06
+      }),
+      Plot.areaY(tdata, {
+        x: "seuil", y: d => d.accuracy * 100,
+        fill: "#4361ee", fillOpacity: 0.06
+      }),
+      Plot.line(tdata, { x: "seuil", y: d => d.couverture * 100, stroke: "#ff6b35", strokeWidth: 2.5 }),
+      Plot.line(tdata, { x: "seuil", y: d => d.accuracy * 100, stroke: "#4361ee", strokeWidth: 2.5 }),
       Plot.tip(tdata, Plot.pointerX({
         x: "seuil",
-        title: d => `Seuil: ${fmt_pct(d.seuil * 100)}%\nCouverture: ${fmt_pct(d.couverture * 100)}%\nAccuracy: ${fmt_pct(d.accuracy * 100)}%`
+        title: d => `Seuil : ${fmt_pct(d.seuil * 100)}%\nCouverture : ${fmt_pct(d.couverture * 100)}%\nAccuracy : ${fmt_pct(d.accuracy * 100)}%`
       }))
     ]
   });
 }
 ```
 
-# Analyse par Critères
 
-## Row {height="60px"}
+# Analyse par Criteres
+
+## Row {height="50px"}
 
 ```{ojs}
-html`<div class="d-flex align-items-center gap-3 flex-wrap">`
-
 viewof analysis_dim = Inputs.select(
   ["source", "annee", "shop_type_name", "budget_tranche"],
   {
     label: "Dimension d'analyse",
-    format: d => ({ source: "Source de données", annee: "Année", shop_type_name: "Type de magasin", budget_tranche: "Tranche de budget" })[d]
+    format: d => ({
+      source: "Source de donnees",
+      annee: "Annee",
+      shop_type_name: "Type de magasin",
+      budget_tranche: "Tranche de budget"
+    })[d]
   }
 )
-
-html`</div>`
 ```
 
 ## Row
@@ -511,7 +638,7 @@ html`</div>`
 
 ```{ojs}
 {
-  if (data_ready?.status !== "ok") return html`<p class="text-muted">Chargez un fichier.</p>`
+  if (data_ready?.status !== "ok") return html`<p style="color:${PALETTE.neutral}">Chargez un fichier.</p>`
 
   const dim = analysis_dim;
   const rows = await db.query(`
@@ -533,7 +660,6 @@ html`</div>`
     LIMIT 20
   `);
 
-  // Préparer les données pour le graphique en barres groupées
   const plot_data = rows.flatMap(r => [1,2,3,4].map(lvl => ({
     dim_val: r.dim_val.length > 25 ? r.dim_val.slice(0,23) + "…" : r.dim_val,
     niveau: `N${lvl}`,
@@ -541,11 +667,16 @@ html`</div>`
   })));
 
   return Plot.plot({
-    height: Math.max(300, rows.length * 28 + 60),
+    height: Math.max(300, rows.length * 32 + 60),
     marginLeft: Math.min(200, Math.max(...rows.map(r => r.dim_val.length)) * 7 + 10),
     marginRight: 60,
-    x: { label: "Accuracy (%)", domain: [0, 100] },
-    color: { legend: true, domain: ["N1","N2","N3","N4"], range: PALETTE.levels },
+    style: { fontSize: "12px" },
+    x: { label: "Accuracy (%)", domain: [0, 100], grid: true },
+    color: {
+      legend: true,
+      domain: ["N1","N2","N3","N4"],
+      range: ["#4361ee", "#2ec4b6", "#f77f00", "#d62828"]
+    },
     marks: [
       Plot.barX(plot_data, {
         y: "dim_val",
@@ -564,7 +695,7 @@ html`</div>`
 
 ```{ojs}
 {
-  if (data_ready?.status !== "ok") return html`<p class="text-muted">…</p>`
+  if (data_ready?.status !== "ok") return html`<p style="color:${PALETTE.neutral}">…</p>`
 
   const dim = analysis_dim;
   const rows = await db.query(`
@@ -579,15 +710,21 @@ html`</div>`
     LIMIT 20
   `);
 
+  const ml = Math.min(180, Math.max(...rows.map(r => r.dim_val.length)) * 7 + 10);
+
   const vol_chart = Plot.plot({
-    height: 200,
-    marginLeft: Math.min(180, Math.max(...rows.map(r => r.dim_val.length)) * 7 + 10),
-    x: { label: "Observations" },
+    height: 220,
+    marginLeft: ml,
+    marginBottom: 35,
+    style: { fontSize: "11px" },
+    x: { label: "Observations", grid: true },
     marks: [
       Plot.barX(rows, {
         y: d => d.dim_val.length > 22 ? d.dim_val.slice(0,20) + "…" : d.dim_val,
         x: "n",
-        fill: "#0d6efd",
+        fill: "#4361ee",
+        fillOpacity: 0.8,
+        rx: 3,
         sort: { y: "-x" },
         tip: true,
         title: d => `${d.dim_val}\nN = ${fmt_n(d.n)}`
@@ -597,33 +734,41 @@ html`</div>`
   });
 
   const conf_chart = Plot.plot({
-    height: 200,
-    marginLeft: Math.min(180, Math.max(...rows.map(r => r.dim_val.length)) * 7 + 10),
-    x: { label: "Confiance moyenne", domain: [0, 1] },
+    height: 220,
+    marginLeft: ml,
+    marginBottom: 35,
+    style: { fontSize: "11px" },
+    x: { label: "Confiance moyenne", domain: [0, 1], grid: true },
     marks: [
       Plot.barX(rows, {
         y: d => d.dim_val.length > 22 ? d.dim_val.slice(0,20) + "…" : d.dim_val,
         x: "mean_conf",
-        fill: "#198754",
+        fill: "#2ec4b6",
+        fillOpacity: 0.8,
+        rx: 3,
         sort: { y: "-x" },
         tip: true,
-        title: d => `${d.dim_val}\nConfiance moy. = ${fmt_conf(d.mean_conf)}`
+        title: d => `${d.dim_val}\nConfiance = ${fmt_conf(d.mean_conf)}`
       }),
       Plot.ruleX([0])
     ]
   });
 
-  return html`${vol_chart}${conf_chart}`;
+  return html`
+    <div class="section-title">Volume par dimension</div>
+    ${vol_chart}
+    <div class="section-title" style="margin-top:1rem">Confiance par dimension</div>
+    ${conf_chart}`;
 }
 ```
 
 ## Row {.tabset}
 
-### Heatmap accuracy × Niveau
+### Heatmap accuracy x Niveau
 
 ```{ojs}
 {
-  if (data_ready?.status !== "ok") return html`<p class="text-muted">…</p>`
+  if (data_ready?.status !== "ok") return html`<p style="color:${PALETTE.neutral}">…</p>`
 
   const dim = analysis_dim;
   const heat_data = await db.query(`
@@ -665,12 +810,13 @@ html`</div>`
   `);
 
   return Plot.plot({
-    height: Math.max(250, heat_data.filter(d => d.niveau === 1).length * 28 + 60),
+    height: Math.max(280, heat_data.filter(d => d.niveau === 1).length * 32 + 60),
     marginLeft: 180,
     marginRight: 40,
+    style: { fontSize: "12px" },
     color: {
       type: "linear", domain: [0, 100],
-      range: ["#dc3545", "#ffc107", "#198754"],
+      range: ["#d62828", "#f77f00", "#2ec4b6"],
       legend: true, label: "Accuracy (%)"
     },
     marks: [
@@ -678,8 +824,10 @@ html`</div>`
         x: d => `Niveau ${d.niveau}`,
         y: d => d.dim_val.length > 25 ? d.dim_val.slice(0,23) + "…" : d.dim_val,
         fill: "accuracy",
+        rx: 4,
+        inset: 1.5,
         tip: true,
-        title: d => `${d.dim_val} — Niveau ${d.niveau}\nAccuracy: ${fmt_pct(d.accuracy)}%\nN = ${fmt_n(d.n)}`
+        title: d => `${d.dim_val} — Niveau ${d.niveau}\nAccuracy : ${fmt_pct(d.accuracy)}%\nN = ${fmt_n(d.n)}`
       }),
       Plot.text(heat_data, {
         x: d => `Niveau ${d.niveau}`,
@@ -693,27 +841,28 @@ html`</div>`
 }
 ```
 
+
 # Explorateur d'Erreurs
 
-## Row {height="120px"}
+## Row {height="100px"}
 
 ```{ojs}
 html`<div class="row g-2">`
 
 viewof err_search_text = Inputs.text({
-  label: "🔍 Libellé produit",
+  label: "Libelle produit",
   placeholder: "ex: jambon, yaourt…",
   value: ""
 })
 
 viewof err_true_code = Inputs.text({
-  label: "Code vrai (préfixe)",
+  label: "Code vrai (prefixe)",
   placeholder: "ex: 01, 01.1",
   value: ""
 })
 
 viewof err_pred_code = Inputs.text({
-  label: "Code prédit (préfixe)",
+  label: "Code predit (prefixe)",
   placeholder: "ex: 02, 03.1",
   value: ""
 })
@@ -725,7 +874,7 @@ viewof err_source = Inputs.select(
 
 viewof err_year = Inputs.select(
   available_years,
-  { label: "Année", value: "Toutes" }
+  { label: "Annee", value: "Toutes" }
 )
 
 viewof err_shop_type = Inputs.select(
@@ -753,12 +902,11 @@ viewof err_severity = Inputs.select(
 html`</div>`
 ```
 
-## Row {height="100px"}
+## Row {height="90px"}
 
 ```{ojs}
-// Stats résumé du filtre
 {
-  if (data_ready?.status !== "ok") return html`<p class="text-muted">…</p>`
+  if (data_ready?.status !== "ok") return html`<p style="color:${PALETTE.neutral}">…</p>`
 
   const { where_clause } = error_filter_state;
 
@@ -774,29 +922,33 @@ html`</div>`
   const s = stats[0];
   const err_rate = s.n_total > 0 ? s.n_errors / s.n_total : 0;
 
-  const card = (val, lbl, color) => html`
-    <div class="card border-${color} h-100">
-      <div class="card-body py-1 text-center">
-        <div style="font-size:1.4em; font-weight:700; color:var(--bs-${color})">${val}</div>
-        <small class="text-muted">${lbl}</small>
-      </div>
+  const pill = (val, lbl, bg, fg) => html`
+    <div style="
+      background:${bg}; color:${fg}; border-radius:10px;
+      padding:.6rem 1rem; text-align:center; flex:1;
+      box-shadow:0 1px 4px rgba(0,0,0,.06)
+    ">
+      <div style="font-size:1.4em; font-weight:800; line-height:1.1">${val}</div>
+      <div style="font-size:.72em; opacity:.85; margin-top:.15rem">${lbl}</div>
     </div>`;
 
-  return html`<div class="row g-2 h-100">
-    <div class="col-sm-3">${card(fmt_n(s.n_total), "Résultats filtrés", "primary")}</div>
-    <div class="col-sm-3">${card(fmt_n(s.n_errors), "Erreurs niveau 4", "danger")}</div>
-    <div class="col-sm-3">${card(fmt_pct(err_rate * 100) + "%", "Taux d'erreur L4", err_rate < 0.1 ? "success" : err_rate < 0.25 ? "warning" : "danger")}</div>
-    <div class="col-sm-3">${card(s.n_codes, "Codes distincts", "secondary")}</div>
+  return html`<div style="display:flex; gap:.5rem; height:100%">
+    ${pill(fmt_n(s.n_total), "Resultats filtres", "#eef0ff", "#4361ee")}
+    ${pill(fmt_n(s.n_errors), "Erreurs N4", "#fce4ec", "#d62828")}
+    ${pill(fmt_pct(err_rate * 100) + "%", "Taux d'erreur L4",
+           err_rate < 0.1 ? "#d8f3dc" : err_rate < 0.25 ? "#fff8e1" : "#fce4ec",
+           err_rate < 0.1 ? "#2d6a4f" : err_rate < 0.25 ? "#e65100" : "#c62828")}
+    ${pill(s.n_codes, "Codes distincts", "#f1f3f5", "#495057")}
   </div>`;
 }
 ```
 
 ## Row
 
-### Résultats {width="65%"}
+### Resultats {width="65%"}
 
 ```{ojs}
-// Construction dynamique du WHERE clause pour les erreurs
+//| output: false
 error_filter_state = {
   const parts = ["true_level4 IS NOT NULL", "predicted_level4 IS NOT NULL"];
 
@@ -823,12 +975,12 @@ error_filter_state = {
   parts.push(`confidence_num >= ${err_conf_min} AND confidence_num <= ${err_conf_max}`);
 
   switch (err_severity) {
-    case "Erreurs seulement":    parts.push("err_l4 = true"); break;
-    case "Correct seulement":   parts.push("error_severity = 'correct'"); break;
-    case "near-miss":            parts.push("error_severity = 'near-miss'"); break;
-    case "L2 faux":              parts.push("error_severity = 'L2 faux'"); break;
-    case "L3 faux":              parts.push("error_severity = 'L3 faux'"); break;
-    case "far-miss":             parts.push("error_severity = 'far-miss'"); break;
+    case "Erreurs seulement":  parts.push("err_l4 = true"); break;
+    case "Correct seulement":  parts.push("error_severity = 'correct'"); break;
+    case "near-miss":          parts.push("error_severity = 'near-miss'"); break;
+    case "L2 faux":            parts.push("error_severity = 'L2 faux'"); break;
+    case "L3 faux":            parts.push("error_severity = 'L3 faux'"); break;
+    case "far-miss":           parts.push("error_severity = 'far-miss'"); break;
   }
 
   return { where_clause: parts.join(" AND ") };
@@ -836,25 +988,22 @@ error_filter_state = {
 ```
 
 ```{ojs}
-// Table des résultats
 {
   if (data_ready?.status !== "ok")
-    return html`<p class="text-muted">Chargez un fichier pour explorer les erreurs.</p>`
+    return html`<p style="color:${PALETTE.neutral}">Chargez un fichier pour explorer les erreurs.</p>`
 
   const { where_clause } = error_filter_state;
 
   const rows = await db.query(`
     SELECT
-      l_pr_product                        AS "Produit",
-      CAST(code AS VARCHAR)               AS "Code vrai",
-      CAST(true_level4 AS VARCHAR)        AS "Niveau 4 vrai",
-      CAST(predicted_level4 AS VARCHAR)   AS "Niveau 4 prédit",
-      ROUND(confidence_num * 100, 1)      AS "Confiance %",
-      error_severity                      AS "Sévérité",
-      COALESCE(source, '')                AS "Source",
-      COALESCE(CAST(annee_int AS VARCHAR), '') AS "Année",
-      COALESCE(shop_type_name, '')        AS "Type magasin",
-      COALESCE(CAST(ROUND(budget_num, 2) AS VARCHAR), '') AS "Budget €"
+      l_pr_product                        AS produit,
+      CAST(code AS VARCHAR)               AS code_vrai,
+      CAST(true_level4 AS VARCHAR)        AS vrai_l4,
+      CAST(predicted_level4 AS VARCHAR)   AS pred_l4,
+      ROUND(confidence_num * 100, 1)      AS conf_pct,
+      error_severity                      AS severite,
+      COALESCE(source, '')                AS source,
+      COALESCE(CAST(annee_int AS VARCHAR), '') AS annee
     FROM preds
     WHERE ${where_clause}
     ORDER BY confidence_num DESC
@@ -862,47 +1011,54 @@ error_filter_state = {
   `);
 
   if (rows.length === 0)
-    return html`<p class="text-muted text-center mt-3">Aucun résultat pour ces critères.</p>`;
+    return html`<p style="color:${PALETTE.neutral}; text-align:center; padding:2rem">Aucun resultat pour ces criteres.</p>`;
 
-  // Coloration des lignes selon sévérité
-  const severity_color = {
-    "correct":   "#d1e7dd",
-    "near-miss": "#d3f9d8",
-    "L3 faux":   "#fff3cd",
-    "L2 faux":   "#ffe0b2",
-    "far-miss":  "#f8d7da",
+  const sevClass = {
+    "correct": "sev-correct", "near-miss": "sev-nearmiss",
+    "L3 faux": "sev-l3faux", "L2 faux": "sev-l2faux", "far-miss": "sev-farmiss"
   };
 
   const table_html = html`
-    <div style="max-height:450px; overflow-y:auto; font-size:.82em">
-      <table class="table table-sm table-hover">
-        <thead class="sticky-top bg-white">
-          <tr>
-            <th>Produit</th><th>Code vrai</th>
-            <th>Prédit L4</th><th>Conf %</th>
-            <th>Sévérité</th><th>Source</th><th>Année</th>
-          </tr>
-        </thead>
+    <div style="max-height:480px; overflow-y:auto">
+      <table class="dash-table">
+        <thead><tr>
+          <th style="min-width:180px">Produit</th>
+          <th>Code vrai</th>
+          <th>Predit L4</th>
+          <th style="text-align:right">Conf.</th>
+          <th>Severite</th>
+          <th>Source</th>
+          <th>Annee</th>
+        </tr></thead>
         <tbody>
           ${rows.map(r => html`
-            <tr style="background:${severity_color[r["Sévérité"]] || 'white'}">
-              <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"
-                  title="${r["Produit"]}">${r["Produit"]}</td>
-              <td><code>${r["Code vrai"]}</code></td>
-              <td><code style="color:${r["Sévérité"] === 'correct' ? '#198754' : '#dc3545'}">${r["Niveau 4 prédit"]}</code></td>
-              <td>${r["Confiance %"]}</td>
-              <td><span style="font-size:.8em">${r["Sévérité"] ?? '–'}</span></td>
-              <td>${r["Source"]}</td>
-              <td>${r["Année"]}</td>
+            <tr class="${sevClass[r.severite] || ''}">
+              <td style="max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"
+                  title="${r.produit}">${r.produit}</td>
+              <td><span class="code-badge">${r.code_vrai}</span></td>
+              <td><span class="code-badge" style="background:${r.severite === 'correct' ? '#d8f3dc' : '#fce4ec'};
+                  color:${r.severite === 'correct' ? '#2d6a4f' : '#c62828'}">${r.pred_l4}</span></td>
+              <td style="text-align:right; font-variant-numeric:tabular-nums; font-weight:600">${r.conf_pct}%</td>
+              <td><span style="font-size:.78em; padding:.15rem .4rem; border-radius:4px;
+                  background:${PALETTE.severity[r.severite] || PALETTE.neutral}22;
+                  color:${PALETTE.severity[r.severite] || PALETTE.neutral}">${r.severite ?? '–'}</span></td>
+              <td style="font-size:.82em">${r.source}</td>
+              <td style="font-size:.82em">${r.annee}</td>
             </tr>`
           )}
         </tbody>
       </table>
-      ${rows.length === 500 ? html`<p class="text-muted text-center" style="font-size:.8em">⚠ Affichage limité à 500 résultats. Affinez vos filtres pour voir plus.</p>` : ''}
+      ${rows.length === 500 ? html`<p style="color:${PALETTE.neutral}; text-align:center; font-size:.8em; padding:.5rem">
+        Affichage limite a 500 resultats — affinez les filtres pour voir plus.</p>` : ''}
     </div>`;
 
-  // Bouton export CSV
-  const export_btn = html`<button class="btn btn-sm btn-outline-secondary mb-2">⬇ Exporter CSV (${rows.length} lignes)</button>`;
+  const export_btn = html`<button style="
+    border:1px solid #dee2e6; background:white; border-radius:6px;
+    padding:.35rem .8rem; font-size:.82em; cursor:pointer; margin-bottom:.5rem;
+    color:#495057; transition:all .15s
+  ">Exporter CSV (${rows.length} lignes)</button>`;
+  export_btn.onmouseenter = () => { export_btn.style.background = "#f8f9fa"; };
+  export_btn.onmouseleave = () => { export_btn.style.background = "white"; };
   export_btn.onclick = () => {
     const header = Object.keys(rows[0]).join(",");
     const lines = rows.map(r => Object.values(r).map(v =>
@@ -912,26 +1068,24 @@ error_filter_state = {
     const csv = [header, ...lines].join("\n");
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "erreurs_coicop.csv"; a.click();
+    const a = document.createElement("a"); a.href = url; a.download = "erreurs_coicop.csv"; a.click();
   };
 
   return html`${export_btn}${table_html}`;
 }
 ```
 
-### Top confusions & sévérité {width="35%"}
+### Top confusions & severite {width="35%"}
 
 ```{ojs}
 {
-  if (data_ready?.status !== "ok") return html`<p class="text-muted">…</p>`
+  if (data_ready?.status !== "ok") return html`<p style="color:${PALETTE.neutral}">…</p>`
 
   const { where_clause } = error_filter_state;
 
-  // Paires de confusion
   const pairs = await db.query(`
     SELECT
-      true_level4 || ' → ' || predicted_level4 AS paire,
+      true_level4 || ' -> ' || predicted_level4 AS paire,
       CAST(COUNT(*) AS INTEGER) AS n
     FROM preds
     WHERE ${where_clause} AND err_l4 = true
@@ -939,16 +1093,20 @@ error_filter_state = {
   `);
 
   const confusion_chart = pairs.length === 0
-    ? html`<p class="text-muted small">Aucune erreur avec ces filtres.</p>`
+    ? html`<p style="color:${PALETTE.neutral}; font-size:.85em">Aucune erreur avec ces filtres.</p>`
     : Plot.plot({
-        height: 220,
-        marginLeft: 160,
-        x: { label: "Nombre d'erreurs" },
+        height: 240,
+        marginLeft: 170,
+        marginBottom: 35,
+        style: { fontSize: "11px" },
+        x: { label: "Nombre d'erreurs", grid: true },
         marks: [
           Plot.barX(pairs.slice().reverse(), {
             y: "paire",
             x: "n",
-            fill: "#dc3545",
+            fill: "#d62828",
+            fillOpacity: 0.8,
+            rx: 3,
             tip: true,
             title: d => `${d.paire}\n${d.n} erreurs`
           }),
@@ -956,7 +1114,6 @@ error_filter_state = {
         ]
       });
 
-  // Répartition sévérité
   const sev_data = await db.query(`
     SELECT
       COALESCE(error_severity, 'N/A') AS severity,
@@ -966,74 +1123,89 @@ error_filter_state = {
     GROUP BY 1 ORDER BY n DESC
   `);
 
+  const sev_colors = {
+    "correct": "#2ec4b6", "near-miss": "#8bc34a",
+    "L3 faux": "#f77f00", "L2 faux": "#ff6b35", "far-miss": "#d62828"
+  };
+
   const sev_chart = Plot.plot({
-    height: 160,
-    marginLeft: 120,
-    x: { label: "Observations" },
+    height: 180,
+    marginLeft: 100,
+    marginBottom: 35,
+    style: { fontSize: "11px" },
+    x: { label: "Observations", grid: true },
     color: {
-      domain: Object.keys(PALETTE.severity),
-      range: Object.values(PALETTE.severity)
+      domain: Object.keys(sev_colors),
+      range: Object.values(sev_colors)
     },
     marks: [
       Plot.barX(sev_data, {
         y: "severity",
         x: "n",
         fill: "severity",
+        rx: 3,
         tip: true,
-        title: d => `${d.severity}: ${fmt_n(d.n)}`
+        title: d => `${d.severity} : ${fmt_n(d.n)}`
       }),
       Plot.ruleX([0])
     ]
   });
 
   return html`
-    <h6 class="mb-1" style="font-size:.85em">Top confusions (L4)</h6>
+    <div class="section-title">Top confusions (L4)</div>
     ${confusion_chart}
-    <h6 class="mt-2 mb-1" style="font-size:.85em">Répartition par sévérité</h6>
+    <div class="section-title" style="margin-top:1.2rem">Repartition par severite</div>
     ${sev_chart}`;
 }
 ```
 
-# Informations Modèle
 
-## Row {height="80px"}
+# Analyse Modele
+
+## Row {height="70px"}
 
 ```{ojs}
-html`<div class="alert alert-info py-2" style="font-size:.9em">
-  Inspectez les métadonnées d'un modèle directement dans le navigateur via <strong>Pyodide</strong> (Python WASM).
-  Fournissez l'URL HTTPS du répertoire du modèle sur S3 — le fichier <code>*_metadata.pkl</code> sera
-  téléchargé et désérialisé côté client, sans serveur.
+html`<div style="
+  background:linear-gradient(135deg, #eef0ff 0%, #f8f9fa 100%);
+  border:1px solid #dee2e6; border-radius:10px;
+  padding:.7rem 1.2rem; font-size:.88em; color:#495057
+">
+  <strong>Inspection client-side via Pyodide</strong> — Fournissez l'URL HTTPS du repertoire du modele.
+  Le fichier <code>*_metadata.pkl</code> sera telecharge et deserialise dans le navigateur, sans serveur.
 </div>`
+```
 
+## Row {height="50px"}
+
+```{ojs}
 viewof model_url = Inputs.text({
-  label: "URL du répertoire modèle (HTTPS/S3)",
+  label: "URL du repertoire modele (HTTPS)",
   placeholder: "https://minio.example.com/bucket/models/basic_model",
   value: ""
 })
 
-viewof inspect_model_btn = Inputs.button("🔍 Inspecter le modèle", {
+viewof inspect_model_btn = Inputs.button("Inspecter le modele", {
   value: 0,
   reduce: v => v + 1
 })
 ```
 
 ```{ojs}
-// Statut Pyodide
 {
   if (!inspect_model_btn) return html`<span></span>`;
   if (!pyodide_instance && inspect_model_btn)
-    return html`<span style="color:#ffc107; font-size:.85em">⏳ Chargement de Pyodide (~20 Mo, mis en cache ensuite)…</span>`;
+    return html`<span style="color:#f77f00; font-size:.82em">Chargement de Pyodide (~20 Mo, mis en cache)…</span>`;
   if (pyodide_instance)
-    return html`<span style="color:#198754; font-size:.85em">⬤ Pyodide prêt</span>`;
+    return html`<span style="color:#2ec4b6; font-size:.82em">Pyodide pret</span>`;
 }
 ```
 
 ## Row
 
-### Métadonnées du modèle {width="55%"}
+### Metadonnees du modele {width="55%"}
 
 ```{ojs}
-// Chargement paresseux de Pyodide (uniquement au clic)
+//| output: false
 pyodide_instance = {
   inspect_model_btn;
   if (!inspect_model_btn) return null;
@@ -1041,7 +1213,6 @@ pyodide_instance = {
   return await loadPyodide();
 }
 
-// Fetch du .pkl et unpickle via Pyodide
 model_metadata = {
   if (!pyodide_instance || !model_url?.trim()) return null;
 
@@ -1062,29 +1233,55 @@ model_metadata = {
       pyodide_instance.globals.set("pkl_bytes", pyodide_instance.toPy(bytes));
 
       const result = pyodide_instance.runPython(`
-import pickle
+import pickle, json
+
 data = pickle.loads(bytes(pkl_bytes))
 safe = {}
+config_keys = []
+label_keys = []
+other_keys = []
+
 for k, v in data.items():
     if isinstance(v, (str, int, float, bool, type(None))):
         safe[k] = v
+        # Heuristic: config params are scalars with short names
+        if any(p in k for p in ['lr', 'epoch', 'batch', 'dim', 'ngram', 'seq',
+                                  'patience', 'samples', 'teacher', 'bucket',
+                                  'embedding', 'level', 'workers', 'memory']):
+            config_keys.append(k)
+        else:
+            other_keys.append(k)
     elif isinstance(v, (list, tuple)):
         safe[f"{k}_count"] = len(v)
-        if len(v) <= 30:
+        if len(v) <= 50:
             safe[k] = [str(x) for x in v]
+        label_keys.append(k)
     elif isinstance(v, dict):
         safe[f"{k}_count"] = len(v)
-        safe[f"{k}_sample"] = [str(x) for x in list(v.keys())[:20]]
+        safe[f"{k}_keys"] = [str(x) for x in list(v.keys())[:30]]
+        # Detect per-level structures
+        if all(isinstance(vv, dict) for vv in v.values()):
+            for sub_k, sub_v in v.items():
+                safe[f"{k}.{sub_k}_count"] = len(sub_v)
+                safe[f"{k}.{sub_k}_sample"] = [str(x) for x in list(sub_v.keys())[:15]]
+        label_keys.append(k)
+    else:
+        other_keys.append(k)
+
+safe["_config_keys"] = config_keys
+safe["_label_keys"] = label_keys
+safe["_other_keys"] = other_keys
 safe
       `);
 
       return {
         metadata_file: name,
+        model_type: name.replace("_metadata.pkl", ""),
         model_url: base,
         metadata: result.toJs({ dict_converter: Object.fromEntries })
       };
     }
-    return { error: `Aucun fichier *_metadata.pkl trouvé à ${base}` };
+    return { error: `Aucun fichier *_metadata.pkl trouve a ${base}` };
   } catch(e) {
     return { error: `Erreur Pyodide : ${e.message}` };
   }
@@ -1094,86 +1291,164 @@ safe
 ```{ojs}
 {
   if (!inspect_model_btn)
-    return html`<p class="text-muted">Renseignez l'URL du modèle et cliquez sur Inspecter.</p>`;
+    return html`<p style="color:${PALETTE.neutral}">Renseignez l'URL du modele et cliquez sur Inspecter.</p>`;
 
   if (!model_metadata)
-    return html`<p class="text-muted">Chargement en cours…</p>`;
+    return html`<p style="color:${PALETTE.neutral}">Chargement en cours…</p>`;
 
   if (model_metadata.error)
-    return html`<div class="alert alert-danger py-2">${model_metadata.error}</div>`;
+    return html`<div style="background:#fce4ec; color:#c62828; padding:.8rem 1rem; border-radius:8px; font-size:.88em">${model_metadata.error}</div>`;
 
   const meta = model_metadata.metadata ?? {};
-  const scalar_rows = Object.entries(meta).filter(([k]) =>
-    !k.endsWith("_sample") && !k.endsWith("_count") || k === "label2id_count"
+  const modelType = model_metadata.model_type;
+
+  // Type badge
+  const typeBadge = {
+    basic: { label: "Classifieur Plat", color: "#4361ee" },
+    hierarchical: { label: "Classifieur Hierarchique", color: "#2ec4b6" },
+    multihead: { label: "Classifieur Multi-tete", color: "#6c63ff" }
+  }[modelType] || { label: modelType, color: PALETTE.neutral };
+
+  // Separate config params from other scalar params
+  const configKeys = meta._config_keys ?? [];
+  const otherKeys = meta._other_keys ?? [];
+
+  const config_rows = Object.entries(meta).filter(([k]) =>
+    configKeys.includes(k) && !k.startsWith("_")
+  );
+  const other_scalar_rows = Object.entries(meta).filter(([k]) =>
+    otherKeys.includes(k) && !k.startsWith("_") && typeof meta[k] !== "object"
   );
 
   return html`
-    <h6>📦 ${model_metadata.metadata_file}</h6>
-    <p class="text-muted small">URL : <code>${model_metadata.model_url}</code></p>
-    <table class="table table-sm table-bordered" style="font-size:.85em">
-      <thead><tr><th>Paramètre</th><th>Valeur</th></tr></thead>
+    <div style="display:flex; align-items:center; gap:.8rem; margin-bottom:1rem">
+      <span style="background:${typeBadge.color}; color:white; padding:.3rem .8rem; border-radius:6px; font-weight:700; font-size:.85em">
+        ${typeBadge.label}
+      </span>
+      <code style="font-size:.8em; color:${PALETTE.neutral}">${model_metadata.metadata_file}</code>
+    </div>
+
+    <div class="section-title">Configuration du modele</div>
+    <table class="dash-table">
+      <thead><tr><th>Parametre</th><th>Valeur</th></tr></thead>
       <tbody>
-        ${scalar_rows.map(([k, v]) => html`
+        ${config_rows.map(([k, v]) => html`
           <tr>
-            <td><code>${k}</code></td>
-            <td>${Array.isArray(v) ? v.join(", ") : String(v ?? "–")}</td>
+            <td><code style="font-size:.85em">${k}</code></td>
+            <td style="font-variant-numeric:tabular-nums">${String(v ?? "–")}</td>
           </tr>`)}
       </tbody>
-    </table>`;
+    </table>
+
+    ${other_scalar_rows.length > 0 ? html`
+      <div class="section-title" style="margin-top:1rem">Autres parametres</div>
+      <table class="dash-table">
+        <thead><tr><th>Cle</th><th>Valeur</th></tr></thead>
+        <tbody>
+          ${other_scalar_rows.map(([k, v]) => html`
+            <tr>
+              <td><code style="font-size:.85em">${k}</code></td>
+              <td>${Array.isArray(v) ? v.join(", ") : String(v ?? "–")}</td>
+            </tr>`)}
+        </tbody>
+      </table>` : ''}
+  `;
 }
 ```
 
-### Codes COICOP connus & serveur API {width="45%"}
+### Codes COICOP connus {width="45%"}
 
 ```{ojs}
 {
-  // Codes connus (depuis l'inspection Pyodide)
-  let codes_html = html``;
-  if (model_metadata?.metadata) {
-    const m = model_metadata.metadata;
-    const sample = m.label2id_sample || m.id2label_sample
-      || Object.entries(m).find(([k]) => k.endsWith("_sample"))?.[1]
-      || [];
-    const count = m.label2id_count || m.id2label_count || null;
-    if (sample.length > 0) {
-      codes_html = html`
-        <h6 style="font-size:.85em">
-          Codes COICOP connus${count ? html` <span class="badge bg-secondary">${count}</span>` : ""}
-        </h6>
-        <div style="font-size:.8em; max-height:280px; overflow-y:auto; line-height:1.8">
-          ${sample.map(c => html`<code class="me-1 mb-1" style="display:inline-block">${c}</code>`)}
-          ${count && count > sample.length ? html`<span class="text-muted">… et ${count - sample.length} autres</span>` : ""}
-        </div>`;
-    }
-  } else if (inspect_model_btn) {
-    codes_html = html`<p class="text-muted small">Inspectez un modèle pour voir ses codes.</p>`;
+  if (!model_metadata?.metadata) {
+    if (inspect_model_btn)
+      return html`<p style="color:${PALETTE.neutral}; font-size:.88em">Inspectez un modele pour voir ses codes.</p>`;
+    return html`<p style="color:${PALETTE.neutral}; font-size:.88em">En attente d'une inspection.</p>`;
   }
 
-  // Health check optionnel du serveur API
-  let api_html = html``;
-  try {
-    const resp = await fetch("http://localhost:8000/health");
-    if (resp.ok) {
-      const h = await resp.json();
-      api_html = html`
-        <div class="alert alert-success py-2 mt-3" style="font-size:.85em">
-          ✅ Serveur API en ligne — modèle ${h.model_loaded ? "chargé" : "non chargé"}
-          <br><small>Chemin : <code>${h.model_path}</code></small>
-        </div>`;
+  const m = model_metadata.metadata;
+  const modelType = model_metadata.model_type;
+
+  // For hierarchical/multihead: show per-level class counts
+  const levelEntries = Object.entries(m).filter(([k]) =>
+    k.match(/^level_label_to_idx\.\w+_count$/) ||
+    k.match(/^level_label_names\.\w+_count$/)
+  );
+
+  // For basic: show label_names or label2id
+  const basicCodes = m.label_names || m.label2id_keys || m.id2label_keys || [];
+  const basicCount = m.label_names_count || m.label2id_count || m.id2label_count || null;
+
+  // Per-level samples
+  const levelSamples = Object.entries(m).filter(([k]) =>
+    k.match(/^level_label_to_idx\.\w+_sample$/) ||
+    k.match(/^level_label_names\.\w+_sample$/)
+  );
+
+  let content;
+
+  if (modelType !== "basic" && levelEntries.length > 0) {
+    // Hierarchical or multihead: show per-level breakdown
+    const levels = {};
+    for (const [k, v] of levelEntries) {
+      const match = k.match(/\.(\w+)_count$/);
+      if (match) levels[match[1]] = v;
     }
-  } catch {
-    api_html = html`
-      <div class="alert alert-secondary py-2 mt-3" style="font-size:.82em">
-        ⬤ Serveur API non détecté sur <code>localhost:8000</code>
-        <details class="mt-1">
-          <summary style="cursor:pointer">Comment le démarrer</summary>
-          <pre style="font-size:.78em; background:#f8f9fa; padding:.5rem; border-radius:4px; margin-top:.3rem"><code>uv run python main.py serve \\
-  --model checkpoints/basic/basic_model \\
-  --host 0.0.0.0 --port 8000</code></pre>
-        </details>
-      </div>`;
+    const levelSampleMap = {};
+    for (const [k, v] of levelSamples) {
+      const match = k.match(/\.(\w+)_sample$/);
+      if (match) levelSampleMap[match[1]] = v;
+    }
+
+    const levelColors = ["#4361ee", "#2ec4b6", "#f77f00", "#d62828", "#6c63ff"];
+
+    content = html`
+      <div class="section-title">Classes par niveau</div>
+      <div style="display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:1rem">
+        ${Object.entries(levels).map(([lvl, count], i) => html`
+          <div style="
+            background:${levelColors[i % levelColors.length]}15;
+            border:1px solid ${levelColors[i % levelColors.length]}40;
+            border-radius:8px; padding:.5rem .8rem; text-align:center; min-width:80px
+          ">
+            <div style="font-size:1.3em; font-weight:800; color:${levelColors[i % levelColors.length]}">${count}</div>
+            <div style="font-size:.72em; color:#495057; text-transform:uppercase; letter-spacing:.04em">${lvl}</div>
+          </div>`
+        )}
+      </div>
+
+      ${Object.entries(levelSampleMap).map(([lvl, codes], i) => html`
+        <details style="margin-bottom:.6rem">
+          <summary style="cursor:pointer; font-size:.82em; font-weight:600; color:#495057">
+            ${lvl} — exemples de codes
+          </summary>
+          <div style="font-size:.78em; line-height:2; padding:.4rem 0">
+            ${codes.map(c => html`<span class="code-badge" style="margin:.15rem">${c}</span>`)}
+          </div>
+        </details>`
+      )}
+    `;
+  } else if (basicCodes.length > 0 || basicCount) {
+    // Basic: flat code list
+    content = html`
+      <div class="section-title">
+        Codes COICOP connus
+        ${basicCount ? html`<span style="
+          background:#4361ee; color:white; font-size:.75em; padding:.15rem .5rem;
+          border-radius:10px; margin-left:.5rem; font-weight:600
+        ">${basicCount}</span>` : ""}
+      </div>
+      <div style="font-size:.8em; max-height:350px; overflow-y:auto; line-height:2">
+        ${basicCodes.map(c => html`<span class="code-badge" style="margin:.15rem">${c}</span>`)}
+        ${basicCount && basicCount > basicCodes.length
+          ? html`<span style="color:${PALETTE.neutral}; font-size:.9em"> … et ${basicCount - basicCodes.length} autres</span>`
+          : ""}
+      </div>
+    `;
+  } else {
+    content = html`<p style="color:${PALETTE.neutral}; font-size:.85em">Aucune information sur les codes trouvee dans les metadonnees.</p>`;
   }
 
-  return html`${codes_html}${api_html}`;
+  return content;
 }
 ```
