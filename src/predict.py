@@ -103,7 +103,7 @@ class _HierarchicalBasePredictor:
                             "confidence": level_data["confidence"][i][0],
                             "alternatives": [
                                 {"code": level_data["predictions"][i][k], "confidence": level_data["confidence"][i][k]}
-                                for k in range(1, top_k)
+                                for k in range(1, min(top_k, len(level_data["predictions"][i])))
                             ],
                         }
                     else:
