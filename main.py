@@ -324,6 +324,90 @@ def cmd_classify_llm(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_decide_coicop(args: argparse.Namespace) -> None:
+    """Decide the final COICOP code using an LLM as judge over multiple model predictions."""
+    import asyncio
+    import json
+    import sys
+
+    from openai import OpenAI
+
+    from src.decide_coicop import (
+        build_prompt,
+        call_llm_sync,
+        get_observation,
+        load_all_observations,
+        load_nomenclature,
+        print_result,
+        run_batch,
+    )
+
+    if not os.environ.get("OPENAI_API_KEY"):
+        logger.error("Variable OPENAI_API_KEY non définie.")
+        sys.exit(1)
+
+    logger.info("Chargement des données...")
+    df = load_all_observations(args.lcs_file, args.rag_file, args.ttc_file)
+
+    logger.info("Chargement de la nomenclature...")
+    nomenclature = load_nomenclature(args.nomenclature)
+
+    if args.id is not None:
+        try:
+            obs = get_observation(df, args.id)
+        except KeyError as exc:
+            logger.error("%s", exc)
+            sys.exit(1)
+
+        api_kwargs: dict = {"api_key": os.environ["OPENAI_API_KEY"]}
+        if base_url := os.environ.get("OPENAI_BASE_URL"):
+            api_kwargs["base_url"] = base_url
+        client = OpenAI(**api_kwargs)
+
+        logger.info(
+            "Appel au modèle %s pour id=%s (nomen=%s)...",
+            args.model,
+            args.id,
+            "complète" if args.full_nomenclature else "filtrée",
+        )
+        prompt = build_prompt(obs, nomenclature, full_nomen=args.full_nomenclature)
+        decision = call_llm_sync(prompt, args.model, client)
+
+        if args.output == "json":
+            print(
+                json.dumps(
+                    {
+                        "id": args.id,
+                        "raw_product": obs.get("raw_product"),
+                        "shop": obs.get("shop"),
+                        "shop_type_name": obs.get("shop_type_name"),
+                        "budget": obs.get("budget"),
+                        "code_reference": obs.get("code"),
+                        "coicop_code": decision.coicop_code,
+                        "libelle": decision.libelle,
+                        "explication": decision.explication,
+                        "confiance": decision.confiance,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        else:
+            print_result(obs, decision)
+        return
+
+    asyncio.run(
+        run_batch(
+            df=df,
+            nomenclature=nomenclature,
+            model=args.model,
+            concurrency=args.concurrency,
+            output_file=Path(args.output_file),
+            full_nomen=args.full_nomenclature,
+        )
+    )
+
+
 def cmd_serve(args: argparse.Namespace) -> None:
     """Start the FastAPI prediction server."""
     import uvicorn
@@ -1620,6 +1704,77 @@ def main() -> int:
         help="Column name for shop category (adds category context to LLM prompt)",
     )
     classify_llm_parser.set_defaults(func=cmd_classify_llm)
+
+    # Decide-coicop command
+    decide_coicop_parser = subparsers.add_parser(
+        "decide-coicop",
+        help="Use an LLM as judge to pick the best COICOP code from multiple model predictions",
+    )
+    decide_coicop_parser.add_argument(
+        "--lcs-file",
+        type=str,
+        default="predictions_lcs.parquet",
+        help="Parquet file with LCS model predictions (default: predictions_lcs.parquet)",
+    )
+    decide_coicop_parser.add_argument(
+        "--rag-file",
+        type=str,
+        default="predictions_rag.parquet",
+        help="Parquet file with RAG model predictions (default: predictions_rag.parquet)",
+    )
+    decide_coicop_parser.add_argument(
+        "--ttc-file",
+        type=str,
+        default="predictions_ttc.parquet",
+        help="Parquet file with TTC deep-learning model predictions (default: predictions_ttc.parquet)",
+    )
+    decide_coicop_parser.add_argument(
+        "--nomenclature",
+        type=str,
+        default="data/coicop_et_codes_techniques.csv",
+        help="Path to COICOP nomenclature CSV (default: data/coicop_et_codes_techniques.csv)",
+    )
+    decide_coicop_parser.add_argument(
+        "--id",
+        default=None,
+        help="Process a single observation by ID and print result. Omit for full batch mode.",
+    )
+    decide_coicop_parser.add_argument(
+        "--model",
+        type=str,
+        default="gpt-4o",
+        help="OpenAI-compatible model name (default: gpt-4o)",
+    )
+    decide_coicop_parser.add_argument(
+        "--output",
+        choices=["text", "json"],
+        default="text",
+        help="Output format for single-observation mode (default: text)",
+    )
+    decide_coicop_parser.add_argument(
+        "--output-file",
+        type=str,
+        default="predictions_llm_decision.parquet",
+        help=(
+            "Output parquet file for batch mode (default: predictions_llm_decision.parquet). "
+            "Supports automatic resume if the file already exists."
+        ),
+    )
+    decide_coicop_parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=20,
+        help="Number of parallel API calls in batch mode (default: 20)",
+    )
+    decide_coicop_parser.add_argument(
+        "--full-nomenclature",
+        action="store_true",
+        help=(
+            "Send the full ~700-code nomenclature with every request instead of "
+            "filtering to predicted sections. Slower and more expensive."
+        ),
+    )
+    decide_coicop_parser.set_defaults(func=cmd_decide_coicop)
 
     # Serve command
     serve_parser = subparsers.add_parser(
