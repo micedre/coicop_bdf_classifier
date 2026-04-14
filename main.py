@@ -485,6 +485,25 @@ def cmd_evaluate_report(args: argparse.Namespace) -> None:
         )
 
 
+def cmd_evaluate_predictions(args: argparse.Namespace) -> None:
+    """Evaluate a prediction file by COICOP level."""
+    from src.evaluation.evaluate_predictions import run_evaluate_predictions
+
+    _, report = run_evaluate_predictions(
+        prediction_path=args.predictions,
+        code_column=args.code_column,
+        text_column=args.text_column,
+        categorical_column=args.category_column,
+        max_k=args.max_k,
+    )
+    print(report)
+
+    if args.output:
+        Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.output).write_text(report, encoding="utf-8")
+        logger.info(f"Report saved to {args.output}")
+
+
 def main() -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -1530,6 +1549,54 @@ def main() -> int:
         help="Spending threshold in euros (default: 200)",
     )
     eval_report_parser.set_defaults(func=cmd_evaluate_report)
+
+    # Evaluate-predictions command
+    eval_pred_parser = subparsers.add_parser(
+        "evaluate-predictions",
+        help=(
+            "Evaluate a prediction file (output from predict commands)"
+            " by COICOP level"
+        ),
+    )
+    eval_pred_parser.add_argument(
+        "predictions",
+        type=str,
+        help="Path to prediction file (local parquet/CSV or s3:// URI)",
+    )
+    eval_pred_parser.add_argument(
+        "--code-column",
+        type=str,
+        default="code",
+        help="Column with the ground-truth COICOP code (default: code)",
+    )
+    eval_pred_parser.add_argument(
+        "--text-column",
+        type=str,
+        default="product",
+        help="Column with the product text (default: product)",
+    )
+    eval_pred_parser.add_argument(
+        "--category-column",
+        type=str,
+        default=None,
+        help=(
+            "Column to group results by"
+            " (e.g. source, store_type, receips_from_app)"
+        ),
+    )
+    eval_pred_parser.add_argument(
+        "--max-k",
+        type=int,
+        default=5,
+        help="Max K for top-K accuracy (default: 5)",
+    )
+    eval_pred_parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Save text report to file",
+    )
+    eval_pred_parser.set_defaults(func=cmd_evaluate_predictions)
 
     # Build-training-data command
     build_data_parser = subparsers.add_parser(
