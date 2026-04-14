@@ -72,18 +72,21 @@ class COICOPSyntheticGenerator:
     def __init__(
         self,
         llm: BaseChatModel | None = None,
-        coicop_path: str | Path = "data/coicop-2018_envoi_rmes_20251022.csv",
+        coicop_path: str | Path = "data/coicop_et_codes_techniques.csv",
+        rmes_path: str | Path | None = "data/coicop-2018_envoi_rmes_20251022.csv",
         examples_per_category: int = 10,
     ) -> None:
         """Initialize the synthetic data generator.
 
         Args:
             llm: LangChain chat model (defaults to OpenAI from env vars)
-            coicop_path: Path to COICOP definitions CSV
+            coicop_path: Path to COICOP definitions CSV (with 98/99 codes)
+            rmes_path: Path to RMES COICOP file for enriched descriptions (optional)
             examples_per_category: Number of examples to generate per category
         """
         self.llm = llm if llm is not None else get_llm_from_env()
         self.coicop_path = Path(coicop_path)
+        self.rmes_path = Path(rmes_path) if rmes_path else None
         self.examples_per_category = examples_per_category
         self._coicop_df: pd.DataFrame | None = None
 
@@ -95,13 +98,15 @@ class COICOPSyntheticGenerator:
         return self._coicop_df
 
     def _load_coicop(self) -> pd.DataFrame:
-        """Load COICOP hierarchy from CSV.
+        """Load COICOP hierarchy from CSV, optionally enriched with RMES descriptions.
 
         Supports multiple formats:
-        - Old format: columns (libelle, code)
+        - Old format: columns (libelle, code) or (Libelle, Code)
         - Enriched format: columns (libelle, code, url, description, comprend, ne_comprend_pas)
         - RMES format: columns (tri, type, parent, code, label_en, label_fr, note_generale_*,
           contenu_central_*, contenu_additionnel_*, note_exclusion_*)
+
+        If rmes_path is set, descriptions from the RMES file are merged in.
         """
         df = pd.read_csv(self.coicop_path, sep=";", encoding="utf-8")
 
@@ -116,10 +121,31 @@ class COICOPSyntheticGenerator:
             })
         elif "comprend" not in df.columns:
             # Old simple format (libelle, code only)
-            df.columns = ["libelle", "code"]
+            if "Libelle" in df.columns:
+                df = df.rename(columns={"Libelle": "libelle", "Code": "code"})
+            else:
+                df.columns = ["libelle", "code"]
             df["comprend"] = None
             df["ne_comprend_pas"] = None
             df["description"] = None
+
+        # Enrich with RMES descriptions if available
+        if self.rmes_path and self.rmes_path.exists():
+            rmes_df = pd.read_csv(self.rmes_path, sep=";", encoding="utf-8")
+            if "label_fr" in rmes_df.columns:
+                rmes_df = rmes_df.rename(columns={
+                    "contenu_central_fr": "comprend",
+                    "note_exclusion_fr": "ne_comprend_pas",
+                    "note_generale_fr": "description",
+                })
+                desc_cols = ["comprend", "ne_comprend_pas", "description"]
+                rmes_descs = rmes_df[["code"] + desc_cols].drop_duplicates(subset="code")
+                df = df.merge(rmes_descs, on="code", how="left", suffixes=("", "_rmes"))
+                for col in desc_cols:
+                    rmes_col = f"{col}_rmes"
+                    if rmes_col in df.columns:
+                        df[col] = df[col].fillna(df[rmes_col])
+                        df = df.drop(columns=[rmes_col])
 
         return df
 
@@ -147,13 +173,44 @@ class COICOPSyntheticGenerator:
         mask = df["code"].str.count(r"\.") == (level - 1)
         return df[mask].copy()
 
-    def _build_generation_prompt(self) -> PromptTemplate:
+    def _get_technical_leaf_nodes(self) -> pd.DataFrame:
+        """Get leaf nodes among technical codes (98.x, 99.x).
+
+        Technical codes have irregular hierarchy depths, so leaf detection
+        is based on whether any other code starts with this code + '.'.
+        """
+        df = self.coicop_df.copy()
+        technical = df[df["code"].str.startswith(("98", "99"))]
+        tech_codes = set(technical["code"].values)
+        is_leaf = technical["code"].apply(
+            lambda c: not any(other.startswith(c + ".") for other in tech_codes)
+        )
+        return technical[is_leaf].copy()
+
+    @staticmethod
+    def _get_code_type(code: str) -> str:
+        """Determine the type of COICOP code for prompt selection.
+
+        Returns:
+            'technical_98', 'technical_99', or 'standard'
+        """
+        if code.startswith("99"):
+            return "technical_99"
+        if code.startswith("98"):
+            return "technical_98"
+        return "standard"
+
+    def _build_generation_prompt(self, code_type: str = "standard") -> PromptTemplate:
         """Build the prompt template for synthetic data generation.
+
+        Args:
+            code_type: One of 'standard', 'technical_98', 'technical_99'
 
         The prompt includes optional sections for "comprend" (what the category includes)
         and "ne_comprend_pas" (what it excludes) from INSEE COICOP descriptions.
         """
-        template = """Tu es un expert en classification des produits et services selon la nomenclature COICOP.
+        templates = {
+            "standard": """Tu es un expert en classification des produits et services selon la nomenclature COICOP.
 
 Génère {num_examples} exemples réalistes de produits ou services pour la catégorie COICOP suivante:
 
@@ -169,7 +226,44 @@ INSTRUCTIONS:
 - Courts (1 à 5 mots généralement)
 - En français
 
-Exemples de produits (un par ligne):"""
+Exemples de produits (un par ligne):""",
+            "technical_98": """Tu es un expert en classification des dépenses des ménages pour l'enquête Budget de Famille de l'INSEE.
+
+Génère {num_examples} exemples réalistes de descriptions de dépenses pour la catégorie technique suivante:
+
+Code: {code}
+Libellé: {libelle}
+{comprend_section}
+{ne_comprend_section}
+
+INSTRUCTIONS:
+- Génère des descriptions comme on les trouve sur un relevé bancaire, un ticket de caisse, ou un carnet de dépenses de ménage
+- Formulations courtes et informelles (1 à 6 mots)
+- En français
+- Varie les formulations: abréviations bancaires, noms d'enseignes, descriptions informelles
+- Exemples de style: "CB CARREFOUR", "COURSES LIDL", "PAIEMENT CB 15/03", "courses du samedi", "supermarché"
+
+Exemples de descriptions (une par ligne):""",
+            "technical_99": """Tu es un expert en classification des dépenses des ménages pour l'enquête Budget de Famille de l'INSEE.
+
+Génère {num_examples} exemples réalistes de descriptions de transactions pour la catégorie hors champ COICOP suivante:
+
+Code: {code}
+Libellé: {libelle}
+{comprend_section}
+{ne_comprend_section}
+
+INSTRUCTIONS:
+- Génère des descriptions comme on les trouve sur un relevé bancaire, un avis d'imposition, ou un carnet de dépenses de ménage
+- Formulations typiques des opérations bancaires et administratives (1 à 8 mots)
+- En français
+- Varie les formulations: libellés bancaires officiels, descriptions informelles du ménage
+- Exemples de style: "VIR SEPA EMIS", "PRELEVEMENT IMPOTS", "RETRAIT DAB", "DON CROIX ROUGE", "cadeau anniversaire", "taxe foncière"
+
+Exemples de descriptions (une par ligne):""",
+        }
+
+        template = templates.get(code_type, templates["standard"])
         return PromptTemplate(
             input_variables=["num_examples", "code", "libelle", "comprend_section", "ne_comprend_section"],
             template=template,
@@ -234,7 +328,8 @@ Produits (un par ligne):"""
         if num_examples is None:
             num_examples = self.examples_per_category
 
-        prompt = self._build_generation_prompt()
+        code_type = self._get_code_type(code)
+        prompt = self._build_generation_prompt(code_type)
 
         # Build optional context sections from INSEE descriptions
         comprend_section = f"Cette catégorie comprend: {comprend}" if comprend else ""
@@ -327,9 +422,10 @@ Produits (un par ligne):"""
 
     def generate_dataset(
         self,
-        level: int = 5,
+        level: int = 4,
         max_categories: int | None = None,
-        exclude_technical: bool = True,
+        exclude_technical: bool = False,
+        output_path: str | Path | None = None,
     ) -> pd.DataFrame:
         """Generate a complete synthetic dataset.
 
@@ -337,29 +433,42 @@ Produits (un par ligne):"""
             level: COICOP hierarchy level to generate for (1-5)
             max_categories: Maximum number of categories to process (for testing)
             exclude_technical: Whether to exclude 98.x and 99.x technical codes
+            output_path: If provided, save incrementally after each category (CSV only)
 
         Returns:
             DataFrame with 'product', 'code', 'libelle' columns
         """
+        # Get standard COICOP codes at the requested level
         categories = self._get_categories_by_level(level)
+        # Exclude technical codes from the level-based selection (they are added separately)
+        categories = categories[~categories["code"].str.startswith(("98", "99"))]
 
-        if exclude_technical:
-            mask = ~categories["code"].str.startswith(("98", "99"))
-            categories = categories[mask]
+        if not exclude_technical:
+            # Add 98/99 leaf nodes (irregular depths, not filtered by level)
+            tech_leaves = self._get_technical_leaf_nodes()
+            categories = pd.concat([categories, tech_leaves], ignore_index=True)
 
         if max_categories is not None:
             categories = categories.head(max_categories)
 
+        total = len(categories)
         all_examples: list[dict[str, str]] = []
 
-        for _, row in categories.iterrows():
+        # Write CSV header if incremental saving is enabled
+        if output_path is not None:
+            output_path = Path(output_path)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write("product;code;libelle\n")
+
+        for i, (_, row) in enumerate(categories.iterrows(), 1):
             code = row["code"]
             libelle = row["libelle"]
             # Extract enriched INSEE descriptions if available
             comprend = row.get("comprend") if pd.notna(row.get("comprend")) else None
             ne_comprend_pas = row.get("ne_comprend_pas") if pd.notna(row.get("ne_comprend_pas")) else None
 
-            logger.info(f"Generating examples for {code}: {libelle}")
+            logger.info(f"[{i}/{total}] Generating examples for {code}: {libelle}")
 
             try:
                 examples = self.generate_for_category(
@@ -367,6 +476,15 @@ Produits (un par ligne):"""
                 )
                 all_examples.extend(examples)
                 logger.info(f"  Generated {len(examples)} examples")
+
+                # Append to file incrementally
+                if output_path is not None:
+                    batch_df = pd.DataFrame(examples)
+                    batch_df.to_csv(
+                        output_path, mode="a", header=False,
+                        index=False, sep=";", encoding="utf-8",
+                    )
+                    logger.info(f"  Saved to {output_path} (total: {len(all_examples)} examples)")
             except Exception as e:
                 logger.warning(f"  Failed to generate for {code}: {e}")
 
@@ -374,9 +492,9 @@ Produits (un par ligne):"""
 
     def generate_with_dataset_generator(
         self,
-        level: int = 5,
+        level: int = 4,
         max_categories: int | None = None,
-        exclude_technical: bool = True,
+        exclude_technical: bool = False,
     ) -> pd.DataFrame:
         """Generate dataset using LangChain's DatasetGenerator.
 
@@ -392,10 +510,11 @@ Produits (un par ligne):"""
             DataFrame with synthetic examples
         """
         categories = self._get_categories_by_level(level)
+        categories = categories[~categories["code"].str.startswith(("98", "99"))]
 
-        if exclude_technical:
-            mask = ~categories["code"].str.startswith(("98", "99"))
-            categories = categories[mask]
+        if not exclude_technical:
+            tech_leaves = self._get_technical_leaf_nodes()
+            categories = pd.concat([categories, tech_leaves], ignore_index=True)
 
         if max_categories is not None:
             categories = categories.head(max_categories)
@@ -434,45 +553,57 @@ Produits (un par ligne):"""
 
 def generate_and_save(
     output_path: str | Path,
-    coicop_path: str | Path = "data/coicop-2018_envoi_rmes_20251022.csv",
+    coicop_path: str | Path = "data/coicop_et_codes_techniques.csv",
+    rmes_path: str | Path | None = "data/coicop-2018_envoi_rmes_20251022.csv",
     examples_per_category: int = 10,
-    level: int = 5,
+    level: int = 4,
     max_categories: int | None = None,
+    exclude_technical: bool = False,
 ) -> pd.DataFrame:
     """Generate synthetic data and save to file.
 
     Uses environment variables for LLM configuration:
         OPENAI_API_KEY: API key (required)
         OPENAI_BASE_URL: Base URL for API (optional)
-        OPENAI_MODEL_NAME: Model name (optional, defaults to gpt-3.5-turbo)
+        OPENAI_MODEL: Model name (optional, defaults to gpt-oss:20b)
 
     Args:
         output_path: Path to save the generated data (parquet or csv)
-        coicop_path: Path to COICOP definitions
+        coicop_path: Path to COICOP definitions (with 98/99 codes)
+        rmes_path: Path to RMES file for enriched descriptions (optional)
         examples_per_category: Number of examples per category
         level: COICOP hierarchy level
         max_categories: Maximum categories to process (for testing)
+        exclude_technical: Whether to exclude 98.x and 99.x technical codes
 
     Returns:
         Generated DataFrame
     """
     generator = COICOPSyntheticGenerator(
         coicop_path=coicop_path,
+        rmes_path=rmes_path,
         examples_per_category=examples_per_category,
     )
+
+    output_path = Path(output_path)
+
+    # For CSV, use incremental saving (writes after each category)
+    # For parquet, save at the end (parquet doesn't support appending)
+    incremental_path = output_path if output_path.suffix != ".parquet" else None
 
     df = generator.generate_dataset(
         level=level,
         max_categories=max_categories,
+        exclude_technical=exclude_technical,
+        output_path=incremental_path,
     )
 
-    output_path = Path(output_path)
     if output_path.suffix == ".parquet":
         df.to_parquet(output_path, index=False)
+        logger.info(f"Saved {len(df)} examples to {output_path}")
     else:
-        df.to_csv(output_path, index=False, sep=";", encoding="utf-8")
+        logger.info(f"Done. {len(df)} examples saved to {output_path}")
 
-    logger.info(f"Saved {len(df)} examples to {output_path}")
     return df
 
 
@@ -494,8 +625,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--coicop",
         type=str,
+        default="data/coicop_et_codes_techniques.csv",
+        help="Path to COICOP definitions CSV (with 98/99 codes)",
+    )
+    parser.add_argument(
+        "--rmes",
+        type=str,
         default="data/coicop-2018_envoi_rmes_20251022.csv",
-        help="Path to COICOP definitions CSV",
+        help="Path to RMES file for enriched descriptions (set to empty to skip)",
     )
     parser.add_argument(
         "--examples",
@@ -508,7 +645,7 @@ if __name__ == "__main__":
         "--level",
         "-l",
         type=int,
-        default=5,
+        default=4,
         help="COICOP hierarchy level (1-5)",
     )
     parser.add_argument(
@@ -518,13 +655,21 @@ if __name__ == "__main__":
         default=None,
         help="Maximum categories to process (for testing)",
     )
+    parser.add_argument(
+        "--exclude-technical",
+        action="store_true",
+        default=False,
+        help="Exclude 98.x and 99.x technical codes",
+    )
 
     args = parser.parse_args()
 
     generate_and_save(
         output_path=args.output,
         coicop_path=args.coicop,
+        rmes_path=args.rmes or None,
         examples_per_category=args.examples,
         level=args.level,
         max_categories=args.max_categories,
+        exclude_technical=args.exclude_technical,
     )

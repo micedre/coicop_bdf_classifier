@@ -28,6 +28,7 @@ def _resolve_mlflow_path(model_path: str | Path) -> Path:
     model_path_str = str(model_path)
     if any(model_path_str.startswith(p) for p in _MLFLOW_PREFIXES):
         import mlflow
+
         logger.info(f"Downloading MLflow artifacts from {model_path_str}...")
         model_path = mlflow.artifacts.download_artifacts(artifact_uri=model_path_str)
         logger.info(f"Downloaded to {model_path}")
@@ -51,7 +52,7 @@ def _configure_s3(con: duckdb.DuckDBPyConnection) -> None:
             SESSION_TOKEN '{os.environ["AWS_SESSION_TOKEN"]}',
             REGION 'us-east-1',
             URL_STYLE 'path',
-            SCOPE 's3://travail/'
+            SCOPE 's3://'
         );
     """)
 
@@ -135,8 +136,13 @@ class _HierarchicalBasePredictor:
                             "code": level_data["predictions"][i][0],
                             "confidence": level_data["confidence"][i][0],
                             "alternatives": [
-                                {"code": level_data["predictions"][i][k], "confidence": level_data["confidence"][i][k]}
-                                for k in range(1, min(top_k, len(level_data["predictions"][i])))
+                                {
+                                    "code": level_data["predictions"][i][k],
+                                    "confidence": level_data["confidence"][i][k],
+                                }
+                                for k in range(
+                                    1, min(top_k, len(level_data["predictions"][i]))
+                                )
                             ],
                         }
                     else:
@@ -201,7 +207,9 @@ class _HierarchicalBasePredictor:
         result_df["predicted_code"] = [p["code"] for p in predictions]
         result_df["final_level"] = [p["final_level"] for p in predictions]
         result_df["confidence"] = [p["confidence"] for p in predictions]
-        result_df["combined_confidence"] = [p["combined_confidence"] for p in predictions]
+        result_df["combined_confidence"] = [
+            p["combined_confidence"] for p in predictions
+        ]
 
         if predictions and "levels" in predictions[0]:
             for level_name in predictions[0]["levels"]:
@@ -209,21 +217,34 @@ class _HierarchicalBasePredictor:
                     p["levels"].get(level_name, {}).get("code", "") for p in predictions
                 ]
                 result_df[f"confidence_{level_name}"] = [
-                    p["levels"].get(level_name, {}).get("confidence", 0.0) for p in predictions
+                    p["levels"].get(level_name, {}).get("confidence", 0.0)
+                    for p in predictions
                 ]
 
                 if top_k > 1:
                     for k in range(1, top_k):
                         rank = k + 1
                         result_df[f"predicted_{level_name}_top{rank}"] = [
-                            p["levels"].get(level_name, {}).get("alternatives", [{}] * k)[k - 1].get("code", "")
-                            if len(p["levels"].get(level_name, {}).get("alternatives", [])) >= k
+                            p["levels"]
+                            .get(level_name, {})
+                            .get("alternatives", [{}] * k)[k - 1]
+                            .get("code", "")
+                            if len(
+                                p["levels"].get(level_name, {}).get("alternatives", [])
+                            )
+                            >= k
                             else ""
                             for p in predictions
                         ]
                         result_df[f"confidence_{level_name}_top{rank}"] = [
-                            p["levels"].get(level_name, {}).get("alternatives", [{}] * k)[k - 1].get("confidence", 0.0)
-                            if len(p["levels"].get(level_name, {}).get("alternatives", [])) >= k
+                            p["levels"]
+                            .get(level_name, {})
+                            .get("alternatives", [{}] * k)[k - 1]
+                            .get("confidence", 0.0)
+                            if len(
+                                p["levels"].get(level_name, {}).get("alternatives", [])
+                            )
+                            >= k
                             else 0.0
                             for p in predictions
                         ]
@@ -310,7 +331,10 @@ class BasicCOICOPPredictor:
                     "code": result["predictions"][i][0],
                     "confidence": result["confidence"][i][0],
                     "alternatives": [
-                        {"code": result["predictions"][i][k], "confidence": result["confidence"][i][k]}
+                        {
+                            "code": result["predictions"][i][k],
+                            "confidence": result["confidence"][i][k],
+                        }
                         for k in range(1, top_k)
                     ],
                 }
@@ -363,7 +387,9 @@ class BasicCOICOPPredictor:
         predicted_codes = result_df["predicted_code"].tolist()
         levels_data = [extract_levels(code) for code in predicted_codes]
         for level_key in ["level1", "level2", "level3", "level4", "level5"]:
-            result_df[f"predicted_{level_key}"] = [d.get(level_key, "") for d in levels_data]
+            result_df[f"predicted_{level_key}"] = [
+                d.get(level_key, "") for d in levels_data
+            ]
 
         if top_k > 1:
             for k in range(1, top_k):
@@ -381,9 +407,13 @@ class BasicCOICOPPredictor:
                     for p in predictions
                 ]
                 top_codes = result_df[f"predicted_code_top{rank}"].tolist()
-                top_levels_data = [extract_levels(code) if code else {} for code in top_codes]
+                top_levels_data = [
+                    extract_levels(code) if code else {} for code in top_codes
+                ]
                 for level_key in ["level1", "level2", "level3", "level4", "level5"]:
-                    result_df[f"predicted_{level_key}_top{rank}"] = [d.get(level_key, "") for d in top_levels_data]
+                    result_df[f"predicted_{level_key}_top{rank}"] = [
+                        d.get(level_key, "") for d in top_levels_data
+                    ]
 
         return result_df
 

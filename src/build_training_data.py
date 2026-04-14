@@ -27,7 +27,7 @@ def _configure_s3(con: duckdb.DuckDBPyConnection) -> None:
             SESSION_TOKEN '{os.environ["AWS_SESSION_TOKEN"]}',
             REGION 'us-east-1',
             URL_STYLE 'path',
-            SCOPE 's3://travail/'
+            SCOPE 's3://'
         );
     """)
 

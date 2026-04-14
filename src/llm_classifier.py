@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 # COICOP taxonomy helpers
 # ---------------------------------------------------------------------------
 
+
 def load_coicop_taxonomy(coicop_path: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Load COICOP taxonomy.
 
@@ -88,6 +89,7 @@ def build_system_prompt(
 # I/O helpers (local + S3, CSV + parquet)
 # ---------------------------------------------------------------------------
 
+
 def _configure_s3(con: duckdb.DuckDBPyConnection) -> None:
     """Configure DuckDB S3 secret from environment variables."""
     con.execute(f"""
@@ -99,7 +101,7 @@ def _configure_s3(con: duckdb.DuckDBPyConnection) -> None:
             SESSION_TOKEN '{os.environ["AWS_SESSION_TOKEN"]}',
             REGION 'us-east-1',
             URL_STYLE 'path',
-            SCOPE 's3://travail/'
+            SCOPE 's3://'
         );
     """)
 
@@ -148,6 +150,7 @@ def _count_output_rows(path: str) -> int:
 # OpenAI client
 # ---------------------------------------------------------------------------
 
+
 def _build_client() -> openai.AsyncOpenAI:
     """Create AsyncOpenAI client from environment variables."""
     base_url = os.environ.get("OPENAI_BASE_URL")
@@ -160,6 +163,7 @@ def _build_client() -> openai.AsyncOpenAI:
 # ---------------------------------------------------------------------------
 # Batch classification
 # ---------------------------------------------------------------------------
+
 
 async def _classify_batch(
     client: openai.AsyncOpenAI,
@@ -301,7 +305,9 @@ async def classify_llm(
     # Build list of (index_in_df, text) so we can match results back
     records = list(df_input.itertuples(index=False))
     if context_columns:
-        missing = [col for col in context_columns.values() if col not in df_input.columns]
+        missing = [
+            col for col in context_columns.values() if col not in df_input.columns
+        ]
         if missing:
             raise ValueError(
                 f"Context columns not found in input: {missing}. "
@@ -324,7 +330,9 @@ async def classify_llm(
         batches.append((len(batches), list(range(i, min(i + batch_size, len(texts))))))
 
     with logging_redirect_tqdm():
-        pbar = tqdm(total=total_rows, unit="row", desc="Classifying", dynamic_ncols=True)
+        pbar = tqdm(
+            total=total_rows, unit="row", desc="Classifying", dynamic_ncols=True
+        )
         try:
             batch_queue: asyncio.Queue = asyncio.Queue(maxsize=concurrency * 3)
             result_queue: asyncio.Queue = asyncio.Queue()
@@ -360,8 +368,7 @@ async def classify_llm(
                     rows = df_input.iloc[buffer_indices].copy()
                     rows["coicop_code"] = buffer_codes
                     rows["coicop_libelle"] = [
-                        code_to_libelle.get(c, "") if c else ""
-                        for c in buffer_codes
+                        code_to_libelle.get(c, "") if c else "" for c in buffer_codes
                     ]
                     write_header = not Path(output_path).exists() or (
                         already_done == 0 and total_written[0] == 0
