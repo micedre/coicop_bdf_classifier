@@ -1,7 +1,7 @@
 #%%
 
 import pandas as pd
-from src.evaluation_metrics import *
+from src.evaluation.evaluation_metrics import *
 
 df = pd.read_parquet("predictions_top5.parquet")
 rows = df[~df["receips_from_app"]].index
@@ -48,7 +48,7 @@ print("\nDerived level1:", parts.str[0].str.zfill(2).head(5).tolist())
 print("Derived level2:", parts.str[:2].str.join(".").head(5).tolist())
 #%%
 
-from src.evaluation_metrics import *
+from src.evaluation.evaluation_metrics import *
 
 
 results=evaluate_by_confidence(predictions, levels=[1,2,3,4])

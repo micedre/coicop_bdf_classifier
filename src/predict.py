@@ -10,7 +10,7 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
-from .data_preparation import preprocess_text
+from .preprocessing.data_preparation import preprocess_text
 
 logging.basicConfig(
     level=logging.INFO,
@@ -287,7 +287,7 @@ class HierarchicalCOICOPPredictor(_HierarchicalBasePredictor):
     """Predictor class for hierarchical COICOP classification."""
 
     def __init__(self, model_path: str | Path):
-        from .hierarchical_classifier import HierarchicalCOICOPClassifier
+        from .classifiers.hierarchical_classifier import HierarchicalCOICOPClassifier
 
         self.model_path = _resolve_mlflow_path(model_path)
         self.classifier = HierarchicalCOICOPClassifier.load(self.model_path)
@@ -298,7 +298,7 @@ class MultiHeadCOICOPPredictor(_HierarchicalBasePredictor):
     """Predictor class for multi-head COICOP classification."""
 
     def __init__(self, model_path: str | Path):
-        from .multihead_classifier import MultiHeadCOICOPClassifier
+        from .classifiers.multihead_classifier import MultiHeadCOICOPClassifier
 
         self.model_path = _resolve_mlflow_path(model_path)
         self.classifier = MultiHeadCOICOPClassifier.load(self.model_path)
@@ -309,7 +309,7 @@ class BasicCOICOPPredictor:
     """Predictor class for basic flat COICOP classification."""
 
     def __init__(self, model_path: str | Path):
-        from .basic_classifier import BasicCOICOPClassifier
+        from .classifiers.basic_classifier import BasicCOICOPClassifier
 
         self.model_path = _resolve_mlflow_path(model_path)
         self.classifier = BasicCOICOPClassifier.load(self.model_path)
@@ -378,7 +378,7 @@ class BasicCOICOPPredictor:
         texts = df[text_column].tolist()
         predictions = self.predict_batch(texts, batch_size=batch_size, top_k=top_k)
 
-        from .data_preparation import extract_levels
+        from .preprocessing.data_preparation import extract_levels
 
         result_df = df.copy()
         result_df["predicted_code"] = [p["code"] for p in predictions]

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from src.mlflow_utils import HierarchicalCOICOPPyfuncWrapper
+from src.tracking.mlflow_utils import HierarchicalCOICOPPyfuncWrapper
 
 
 LEVEL_NAMES = ["level1", "level2", "level3", "level4", "level5"]
@@ -75,7 +75,7 @@ def sample_input():
     return pd.DataFrame({"text": ["pain complet bio", "eau minerale"]})
 
 
-@patch("src.mlflow_utils.HierarchicalCOICOPPyfuncWrapper.load_context")
+@patch("src.tracking.mlflow_utils.HierarchicalCOICOPPyfuncWrapper.load_context")
 def _build_wrapper(stopwords_file, mock_load_context):
     """Helper: create a wrapper with mocked internals, bypassing load_context."""
     wrapper = HierarchicalCOICOPPyfuncWrapper()
@@ -89,8 +89,8 @@ def _build_wrapper(stopwords_file, mock_load_context):
 
 
 class TestLoadContext:
-    @patch("src.hierarchical_classifier.HierarchicalCOICOPClassifier")
-    @patch("src.data_preparation.preprocess_text")
+    @patch("src.classifiers.hierarchical_classifier.HierarchicalCOICOPClassifier")
+    @patch("src.preprocessing.data_preparation.preprocess_text")
     def test_load_context(self, mock_preprocess, mock_cls, mock_context):
         """load_context loads the classifier and stopwords."""
         mock_cls.load.return_value = MagicMock()

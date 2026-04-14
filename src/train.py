@@ -8,10 +8,10 @@ from pathlib import Path
 
 import mlflow
 
-from .basic_classifier import BasicCOICOPClassifier, BasicConfig
-from .data_preparation import load_annotations
-from .hierarchical_classifier import HierarchicalCOICOPClassifier, HierarchicalConfig
-from .multihead_classifier import MultiHeadCOICOPClassifier, MultiHeadConfig
+from .classifiers.basic_classifier import BasicCOICOPClassifier, BasicConfig
+from .preprocessing.data_preparation import load_annotations
+from .classifiers.hierarchical_classifier import HierarchicalCOICOPClassifier, HierarchicalConfig
+from .classifiers.multihead_classifier import MultiHeadCOICOPClassifier, MultiHeadConfig
 
 logging.basicConfig(
     level=logging.INFO,
@@ -64,7 +64,7 @@ def _evaluate_on_annotations(
     import pandas as pd
 
     from .predict import HierarchicalCOICOPPredictor
-    from .topk_accuracy import (
+    from .evaluation.topk_accuracy import (
         compute_topk_accuracy,
         detect_levels,
         detect_max_k,
@@ -620,7 +620,7 @@ def train_basic_classifier(
     """
     _all_args = dict(locals())
 
-    from .data_preparation import read_parquet
+    from .preprocessing.data_preparation import read_parquet
 
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -630,7 +630,7 @@ def train_basic_classifier(
     df = read_parquet(data_path, encryption_key)
     if preprocess:
         import json
-        from .data_preparation import preprocess_text
+        from .preprocessing.data_preparation import preprocess_text
 
         with open("data/text/stopwords.json", "r", encoding="utf-8") as f:
             stopwords = json.load(f)
@@ -654,7 +654,7 @@ def train_basic_classifier(
             }
         )
 
-        from .mlflow_utils import make_trainer_params
+        from .tracking.mlflow_utils import make_trainer_params
 
         run_id = mlflow.active_run().info.run_id
         trainer_params = make_trainer_params(
@@ -934,7 +934,7 @@ def fine_tune_basic_classifier(
     """
     _all_args = dict(locals())
 
-    from .data_preparation import read_parquet
+    from .preprocessing.data_preparation import read_parquet
 
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -948,7 +948,7 @@ def fine_tune_basic_classifier(
     df = read_parquet(data_path, encryption_key)
     if preprocess:
         import json
-        from .data_preparation import preprocess_text
+        from .preprocessing.data_preparation import preprocess_text
 
         with open("data/text/stopwords.json", "r", encoding="utf-8") as f:
             stopwords = json.load(f)
@@ -973,7 +973,7 @@ def fine_tune_basic_classifier(
             }
         )
 
-        from .mlflow_utils import make_trainer_params
+        from .tracking.mlflow_utils import make_trainer_params
 
         run_id = mlflow.active_run().info.run_id
         trainer_params = make_trainer_params(

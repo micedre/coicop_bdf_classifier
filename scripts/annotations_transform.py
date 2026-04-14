@@ -1,4 +1,4 @@
-from src.data_preparation import load_annotations
+from src.preprocessing.data_preparation import load_annotations
 from src.predict import HierarchicalCOICOPPredictor
 from sklearn.metrics import accuracy_score, classification_report
 

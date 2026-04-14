@@ -301,7 +301,7 @@ def cmd_classify_llm(args: argparse.Namespace) -> None:
     """Classify a file into COICOP codes using an LLM."""
     import asyncio
 
-    from src.llm_classifier import classify_llm
+    from src.classifiers.llm_classifier import classify_llm
 
     context_columns = {}
     if args.price_column:
@@ -423,7 +423,7 @@ def cmd_serve(args: argparse.Namespace) -> None:
 
 def cmd_extract_ddc(args: argparse.Namespace) -> None:
     """Extract DDC data from S3."""
-    from src.extract_ddc import extract_ddc
+    from src.data.extract_ddc import extract_ddc
 
     extract_ddc(
         annee=args.annee,
@@ -439,7 +439,7 @@ def cmd_extract_ddc(args: argparse.Namespace) -> None:
 
 def cmd_build_training_data(args: argparse.Namespace) -> None:
     """Build a balanced training dataset from DDC and synthetic data."""
-    from src.build_training_data import build_training_data
+    from src.data.build_training_data import build_training_data
 
     build_training_data(
         ddc_path=args.ddc,
@@ -456,7 +456,7 @@ def cmd_build_training_data(args: argparse.Namespace) -> None:
 
 def cmd_evaluate_report(args: argparse.Namespace) -> None:
     """Generate a comprehensive evaluation report on annotated data."""
-    from src.evaluation_report import (
+    from src.evaluation.evaluation_report import (
         run_evaluation,
         format_report,
         log_metrics_to_mlflow,

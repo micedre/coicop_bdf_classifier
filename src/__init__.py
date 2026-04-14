@@ -1,8 +1,8 @@
 """COICOP BDF Classifier package."""
 
-from .data_preparation import load_annotations, load_coicop_hierarchy
-from .basic_classifier import BasicCOICOPClassifier, BasicConfig
-from .hierarchical_classifier import HierarchicalCOICOPClassifier, HierarchicalConfig
+from .preprocessing.data_preparation import load_annotations, load_coicop_hierarchy
+from .classifiers.basic_classifier import BasicCOICOPClassifier, BasicConfig
+from .classifiers.hierarchical_classifier import HierarchicalCOICOPClassifier, HierarchicalConfig
 from .predict import BasicCOICOPPredictor, HierarchicalCOICOPPredictor
 
 __all__ = [
