@@ -1111,19 +1111,22 @@ def main() -> int:
         "--model",
         type=str,
         default="checkpoints/basic/basic_model",
-        help="Path to saved basic model",
+        help=(
+            "Path to saved basic model, or MLflow URI "
+            "(runs:/<run_id>/…, models:/<name>/<version>, mlflow-artifacts:/…)"
+        ),
     )
     predict_basic_parser.add_argument(
         "--file",
         type=str,
         default=None,
-        help="Input file for batch prediction",
+        help="Input file for batch prediction (local path or s3:// URI, CSV or parquet)",
     )
     predict_basic_parser.add_argument(
         "--output",
         type=str,
         default="predictions_basic.csv",
-        help="Output file for batch prediction",
+        help="Output file for batch prediction (local path or s3:// URI, CSV or parquet)",
     )
     predict_basic_parser.add_argument(
         "--text-column",

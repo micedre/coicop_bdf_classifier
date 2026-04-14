@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 
+import duckdb
 import pandas as pd
 
 from .data_preparation import preprocess_text
@@ -38,23 +40,54 @@ def _load_stopwords() -> list[str]:
         return json.load(f)
 
 
-def _read_input_file(input_path: Path) -> pd.DataFrame:
-    """Read a CSV or parquet input file."""
-    if input_path.suffix == ".parquet":
-        return pd.read_parquet(input_path)
-    elif input_path.suffix == ".csv":
-        return pd.read_csv(input_path, sep=";")
-    else:
-        raise ValueError(f"Unsupported file format: {input_path.suffix}")
+def _configure_s3(con: duckdb.DuckDBPyConnection) -> None:
+    """Configure DuckDB S3 secret from environment variables."""
+    con.execute(f"""
+        CREATE SECRET secret_ls3 (
+            TYPE S3,
+            KEY_ID '{os.environ["AWS_ACCESS_KEY_ID"]}',
+            SECRET '{os.environ["AWS_SECRET_ACCESS_KEY"]}',
+            ENDPOINT '{os.environ["AWS_S3_ENDPOINT"]}',
+            SESSION_TOKEN '{os.environ["AWS_SESSION_TOKEN"]}',
+            REGION 'us-east-1',
+            URL_STYLE 'path',
+            SCOPE 's3://travail/'
+        );
+    """)
 
 
-def _write_output_file(df: pd.DataFrame, output_path: Path) -> None:
-    """Write a DataFrame to CSV or parquet."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    if output_path.suffix == ".parquet":
-        df.to_parquet(output_path, index=False)
+def _read_input_file(input_path: str | Path) -> pd.DataFrame:
+    """Read a CSV or parquet input file (local path or S3 URI)."""
+    path_str = str(input_path)
+    if path_str.startswith("s3://"):
+        con = duckdb.connect()
+        _configure_s3(con)
+        return con.execute(f"SELECT * FROM '{path_str}'").df()
+    path = Path(path_str)
+    if path.suffix == ".parquet":
+        return pd.read_parquet(path)
+    elif path.suffix == ".csv":
+        return pd.read_csv(path, sep=";")
     else:
-        df.to_csv(output_path, index=False)
+        raise ValueError(f"Unsupported file format: {path.suffix}")
+
+
+def _write_output_file(df: pd.DataFrame, output_path: str | Path) -> None:
+    """Write a DataFrame to CSV or parquet (local path or S3 URI)."""
+    path_str = str(output_path)
+    if path_str.startswith("s3://"):
+        con = duckdb.connect()
+        _configure_s3(con)
+        con.register("__output", df)
+        fmt = "PARQUET" if path_str.endswith(".parquet") else "CSV"
+        con.execute(f"COPY __output TO '{path_str}' (FORMAT {fmt})")
+        return
+    path = Path(path_str)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.suffix == ".parquet":
+        df.to_parquet(path, index=False)
+    else:
+        df.to_csv(path, index=False)
 
 
 class _HierarchicalBasePredictor:
@@ -362,10 +395,7 @@ class BasicCOICOPPredictor:
         batch_size: int = 64,
         top_k: int = 1,
     ) -> None:
-        """Predict codes for a file and save results."""
-        input_path = Path(input_path)
-        output_path = Path(output_path)
-
+        """Predict codes for a file and save results (local path or S3 URI)."""
         logger.info(f"Loading texts from {input_path}...")
         df = _read_input_file(input_path)
         df = preprocess_text(df, text_column, _load_stopwords())
