@@ -9,7 +9,7 @@ import os
 import duckdb
 import pandas as pd
 
-from src.data_preparation import preprocess_text
+from ..preprocessing.data_preparation import preprocess_text
 
 logger = logging.getLogger(__name__)
 

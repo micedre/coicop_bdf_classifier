@@ -2,6 +2,6 @@
 
 import mlflow
 
-from src.mlflow_utils import MultiHeadCOICOPPyfuncWrapper
+from .mlflow_utils import MultiHeadCOICOPPyfuncWrapper
 
 mlflow.models.set_model(MultiHeadCOICOPPyfuncWrapper())

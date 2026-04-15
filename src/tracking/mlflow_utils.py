@@ -58,8 +58,8 @@ class COICOPPyfuncWrapper(mlflow.pyfunc.PythonModel):
     def load_context(self, context):
         import json
 
-        from .basic_classifier import BasicCOICOPClassifier
-        from .data_preparation import preprocess_text
+        from ..classifiers.basic_classifier import BasicCOICOPClassifier
+        from ..preprocessing.data_preparation import preprocess_text
 
         self.classifier = BasicCOICOPClassifier.load(context.artifacts["model_dir"])
 
@@ -106,7 +106,7 @@ class _HierarchicalPyfuncWrapper(mlflow.pyfunc.PythonModel):
         import importlib
         import json
 
-        from .data_preparation import preprocess_text
+        from ..preprocessing.data_preparation import preprocess_text
 
         mod = importlib.import_module(self._classifier_module, package="src")
         cls = getattr(mod, self._classifier_class)
@@ -168,11 +168,11 @@ class HierarchicalCOICOPPyfuncWrapper(_HierarchicalPyfuncWrapper):
     """Pyfunc wrapper for HierarchicalCOICOPClassifier."""
 
     _classifier_class = "HierarchicalCOICOPClassifier"
-    _classifier_module = ".hierarchical_classifier"
+    _classifier_module = ".classifiers.hierarchical_classifier"
 
 
 class MultiHeadCOICOPPyfuncWrapper(_HierarchicalPyfuncWrapper):
     """Pyfunc wrapper for MultiHeadCOICOPClassifier."""
 
     _classifier_class = "MultiHeadCOICOPClassifier"
-    _classifier_module = ".multihead_classifier"
+    _classifier_module = ".classifiers.multihead_classifier"

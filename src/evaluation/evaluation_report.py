@@ -11,7 +11,7 @@ from pathlib import Path
 import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score
 
-from .data_preparation import extract_levels, preprocess_text
+from ..preprocessing.data_preparation import extract_levels, preprocess_text
 
 logger = logging.getLogger(__name__)
 
@@ -184,13 +184,13 @@ def load_predictor(model_path: str | Path) -> _UniformPredictor:
     # Local model
     model_dir = Path(model_path)
     if (model_dir / "basic_metadata.pkl").exists():
-        from .predict import BasicCOICOPPredictor
+        from ..predict import BasicCOICOPPredictor
 
         predictor = BasicCOICOPPredictor(model_dir)
         return _UniformPredictor(predictor, is_pyfunc=False)
 
     if (model_dir / "hierarchical_metadata.pkl").exists():
-        from .predict import HierarchicalCOICOPPredictor
+        from ..predict import HierarchicalCOICOPPredictor
 
         predictor = HierarchicalCOICOPPredictor(model_dir)
         return _UniformPredictor(predictor, is_pyfunc=False)

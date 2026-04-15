@@ -8,7 +8,7 @@ import sys
 
 import pandas as pd
 
-from src.data_preparation import extract_levels
+from ..preprocessing.data_preparation import extract_levels
 
 
 def detect_levels(columns: list[str]) -> list[int]:

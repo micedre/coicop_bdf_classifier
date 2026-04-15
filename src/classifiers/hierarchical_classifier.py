@@ -21,7 +21,7 @@ from torchTextClassifiers.tokenizers import NGramTokenizer
 if TYPE_CHECKING:
     import pandas as pd
 
-from .data_preparation import COICOP_LEVELS
+from ..preprocessing.data_preparation import COICOP_LEVELS
 
 logger = logging.getLogger(__name__)
 
@@ -358,7 +358,7 @@ class HierarchicalCOICOPClassifier:
         """
         from sklearn.model_selection import train_test_split
 
-        from .data_preparation import extract_levels
+        from ..preprocessing.data_preparation import extract_levels
 
         # Ensure we have a copy with level columns
         df = df.copy()
@@ -602,7 +602,7 @@ class HierarchicalCOICOPClassifier:
             # Build per-level trainer_params with MLflow logger if available
             level_trainer_params = {"log_every_n_steps": 50}
             if mlflow_run_info:
-                from .mlflow_utils import make_trainer_params
+                from ..tracking.mlflow_utils import make_trainer_params
 
                 level_trainer_params.update(
                     make_trainer_params(**mlflow_run_info, prefix=level_name)
@@ -718,7 +718,7 @@ class HierarchicalCOICOPClassifier:
         import pandas as pd
         from sklearn.model_selection import train_test_split
 
-        from .data_preparation import extract_levels
+        from ..preprocessing.data_preparation import extract_levels
 
         if not self._is_trained:
             raise RuntimeError(
@@ -872,7 +872,7 @@ class HierarchicalCOICOPClassifier:
                 # Build per-level trainer_params with MLflow logger if available
                 level_trainer_params = {"log_every_n_steps": 50}
                 if mlflow_run_info:
-                    from .mlflow_utils import make_trainer_params
+                    from ..tracking.mlflow_utils import make_trainer_params
 
                     level_trainer_params.update(
                         make_trainer_params(**mlflow_run_info, prefix=level_name)

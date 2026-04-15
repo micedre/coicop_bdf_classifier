@@ -41,7 +41,7 @@ from torchTextClassifiers.tokenizers import NGramTokenizer
 if TYPE_CHECKING:
     import pandas as pd
 
-from .data_preparation import COICOP_LEVELS
+from ..preprocessing.data_preparation import COICOP_LEVELS
 
 logger = logging.getLogger(__name__)
 
@@ -459,7 +459,7 @@ class MultiHeadCOICOPClassifier:
         import pandas as pd
         from sklearn.model_selection import train_test_split
 
-        from .data_preparation import extract_levels
+        from ..preprocessing.data_preparation import extract_levels
 
         # Extract level columns
         df = df.copy()
@@ -616,7 +616,7 @@ class MultiHeadCOICOPClassifier:
         # Logger
         trainer_logger = None
         if mlflow_run_info:
-            from .mlflow_utils import NonFinalizingMLFlowLogger
+            from ..tracking.mlflow_utils import NonFinalizingMLFlowLogger
 
             trainer_logger = NonFinalizingMLFlowLogger(
                 experiment_name=mlflow_run_info["experiment_name"],

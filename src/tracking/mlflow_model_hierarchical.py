@@ -2,6 +2,6 @@
 
 import mlflow
 
-from src.mlflow_utils import HierarchicalCOICOPPyfuncWrapper
+from .mlflow_utils import HierarchicalCOICOPPyfuncWrapper
 
 mlflow.models.set_model(HierarchicalCOICOPPyfuncWrapper())
