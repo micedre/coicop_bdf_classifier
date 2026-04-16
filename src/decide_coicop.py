@@ -47,14 +47,16 @@ class DecisionCoicop(BaseModel):
         )
     )
     libelle: str = Field(
-        description="Libellé COICOP correspondant au code retenu, copié de la nomenclature."
+        max_length=150,
+        description="Libellé COICOP correspondant au code retenu, copié de la nomenclature.",
     )
     explication: str = Field(
+        max_length=400,
         description=(
-            "Justification du choix en français : pourquoi ce code est retenu, "
-            "comment les prédictions des modèles ont été prises en compte, "
-            "et les éventuelles ambiguïtés."
-        )
+            "Justification du choix en français en 1 phrase maximum : "
+            "pourquoi ce code est retenu, comment les prédictions des modèles "
+            "ont été prises en compte, et les éventuelles ambiguïtés."
+        ),
     )
     confiance: int = Field(
         ge=1,
@@ -127,6 +129,66 @@ def load_nomenclature(path: Path | str) -> pd.DataFrame:
 
 def _nomen_to_str(nomen: pd.DataFrame) -> str:
     return "\n".join(f"{r['Code']} — {r['Libelle']}" for _, r in nomen.iterrows())
+
+
+def _get_libelle(code: str, nomen: pd.DataFrame) -> str:
+    """Retourne le libellé COICOP d'un code, ou le code lui-même si introuvable."""
+    row = nomen[nomen["Code"] == code]
+    return str(row.iloc[0]["Libelle"]) if not row.empty else code
+
+
+def try_consensus_decision(
+    obs: dict,
+    nomenclature: pd.DataFrame,
+    threshold: float = 0.90,
+) -> "DecisionCoicop | None":
+    """Retourne une décision par consensus si tous les modèles s'accordent
+    sur le même code et que la confiance TTC top-1 est suffisamment élevée.
+
+    Évite un appel LLM pour les cas « faciles » : économise du temps et des tokens.
+    Retourne None si les conditions ne sont pas réunies.
+    """
+    ttc_conf = obs.get("ttc_conf_1")
+    if ttc_conf is None or (isinstance(ttc_conf, float) and pd.isna(ttc_conf)):
+        return None
+    if float(ttc_conf) < threshold:
+        return None
+
+    ttc_code = obs.get("ttc_code_1")
+    if ttc_code is None or (isinstance(ttc_code, float) and pd.isna(ttc_code)):
+        return None
+    ttc_code = str(ttc_code)
+
+    # Collect all non-null codes from the other two models
+    other_codes = []
+    for key in ("lcs_code", "rag_code"):
+        val = obs.get(key)
+        if val is not None and not (isinstance(val, float) and pd.isna(val)):
+            other_codes.append(str(val))
+
+    # Every available code must match TTC top-1
+    if not all(c == ttc_code for c in other_codes):
+        return None
+
+    n_models = 1 + len(other_codes)
+    libelle = _get_libelle(ttc_code, nomenclature)
+    explication = (
+        f"Consensus automatique : les {n_models} modèles s'accordent sur le code "
+        f"{ttc_code} avec une confiance TTC de {float(ttc_conf):.0%}. "
+        "Décision prise sans arbitrage LLM."
+    )
+    logger.debug(
+        "[%s] Consensus détecté : code=%s conf_ttc=%.0f%%",
+        obs.get("id"),
+        ttc_code,
+        float(ttc_conf) * 100,
+    )
+    return DecisionCoicop(
+        coicop_code=ttc_code,
+        libelle=libelle,
+        explication=explication,
+        confiance=5,
+    )
 
 
 def filter_nomenclature(nomen: pd.DataFrame, obs: dict, full: bool = False) -> str:
@@ -332,7 +394,7 @@ INSTRUCTIONS
 ═══════════════════════════════════════
 1. Choisis UN code COICOP parmi ceux listés dans la nomenclature ci-dessus.
 2. Le code doit correspondre au niveau le plus précis qui te semble justifié.
-3. Explique en français comment tu as pesé les prédictions des trois modèles
+3. Explique en 1 phrase maximum comment tu as pesé les prédictions des trois modèles
    et tout autre indice (enseigne, type de magasin, montant).
 4. Attribue un score de confiance de 1 (très faible) à 5 (très élevé).
 """
@@ -341,8 +403,13 @@ INSTRUCTIONS
 # ── Appel LLM (synchrone — mode observation unique) ──────────────────────────
 
 SYSTEM_MSG = (
-    "Tu es un expert COICOP. Réponds uniquement via le schéma JSON demandé. "
-    "Le champ coicop_code doit être un code existant dans la nomenclature fournie."
+    "Tu es un expert COICOP. "
+    "Réponds UNIQUEMENT avec un objet JSON valide, sans texte avant ni après, "
+    "respectant exactement ce schéma :\n"
+    '{"coicop_code": "<code exact de la nomenclature>", '
+    '"libelle": "<libellé copié de la nomenclature>", '
+    '"explication": "<1 phrase max>", '
+    '"confiance": <entier 1-5>}'
 )
 
 
@@ -355,14 +422,15 @@ def call_llm_sync(prompt: str, model: str, client: OpenAI) -> DecisionCoicop:
     )
     t0 = time.perf_counter()
     try:
-        completion = client.beta.chat.completions.parse(
+        completion = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": SYSTEM_MSG},
                 {"role": "user", "content": prompt},
             ],
-            response_format=DecisionCoicop,
+            response_format={"type": "json_object"},
             temperature=0.0,
+            max_tokens=512,
         )
     except openai.AuthenticationError as exc:
         logger.error("Authentification échouée (vérifiez OPENAI_API_KEY) : %s", exc)
@@ -386,20 +454,27 @@ def call_llm_sync(prompt: str, model: str, client: OpenAI) -> DecisionCoicop:
 
     latency = time.perf_counter() - t0
     usage = completion.usage
+    finish = completion.choices[0].finish_reason
     logger.info(
         "Response: finish_reason=%s | tokens prompt=%d completion=%d total=%d | %.2fs",
-        completion.choices[0].finish_reason,
+        finish,
         usage.prompt_tokens if usage else -1,
         usage.completion_tokens if usage else -1,
         usage.total_tokens if usage else -1,
         latency,
     )
 
-    result = completion.choices[0].message.parsed
-    if result is None:
+    if finish == "length":
         raw = completion.choices[0].message.content
-        logger.error("Structured output parsing échoué. Réponse brute : %s", raw)
-        raise ValueError(f"Structured output parsing failed. Raw: {raw}")
+        logger.error("Réponse tronquée (finish_reason=length) : %s", raw)
+        raise ValueError(f"Response truncated before JSON was complete. Raw: {raw}")
+
+    raw = completion.choices[0].message.content or ""
+    try:
+        result = DecisionCoicop.model_validate_json(raw)
+    except Exception as exc:
+        logger.error("Parsing JSON échoué. Réponse brute : %s — %s", raw, exc)
+        raise ValueError(f"JSON parsing failed: {exc}. Raw: {raw}") from exc
 
     logger.debug(
         "Parsed: coicop_code=%s confiance=%d", result.coicop_code, result.confiance
@@ -426,6 +501,29 @@ async def call_llm_async(
             "llm_model": model,
             "llm_timestamp": datetime.now(timezone.utc).isoformat(),
         }
+
+        # Fast path: skip LLM when all models agree with high TTC confidence
+        consensus = try_consensus_decision(obs, nomenclature)
+        if consensus is not None:
+            logger.info(
+                "[%s] ✓ Consensus (LLM ignoré) : code=%s conf_ttc=%.0f%%",
+                obs_id,
+                consensus.coicop_code,
+                float(obs.get("ttc_conf_1", 0)) * 100,
+            )
+            return {
+                **base,
+                "llm_model": "consensus",
+                "llm_code": consensus.coicop_code,
+                "llm_libelle": consensus.libelle,
+                "llm_explication": consensus.explication,
+                "llm_confiance": consensus.confiance,
+                "llm_prompt_tokens": 0,
+                "llm_completion_tokens": 0,
+                "llm_latency_s": 0.0,
+                "llm_error": None,
+            }
+
         prompt = build_prompt(obs, nomenclature, full_nomen=full_nomen)
         logger.debug(
             "[%s] Request: model=%s, prompt_chars=%d (~%d tokens)",
@@ -436,14 +534,15 @@ async def call_llm_async(
         )
         t0 = time.perf_counter()
         try:
-            completion = await client.beta.chat.completions.parse(
+            completion = await client.chat.completions.create(
                 model=model,
                 messages=[
                     {"role": "system", "content": SYSTEM_MSG},
                     {"role": "user", "content": prompt},
                 ],
-                response_format=DecisionCoicop,
+                response_format={"type": "json_object"},
                 temperature=0.0,
+                max_tokens=512,
             )
             latency = time.perf_counter() - t0
             usage = completion.usage
@@ -459,15 +558,21 @@ async def call_llm_async(
                 latency,
             )
 
-            decision = completion.choices[0].message.parsed
-            if decision is None:
+            if finish == "length":
                 raw = completion.choices[0].message.content
+                raise ValueError(f"Response truncated before JSON was complete. Raw: {raw}")
+
+            raw = completion.choices[0].message.content or ""
+            try:
+                decision = DecisionCoicop.model_validate_json(raw)
+            except Exception as parse_exc:
                 logger.error(
-                    "[%s] Structured output parsing échoué. Réponse brute : %s",
+                    "[%s] Parsing JSON échoué. Réponse brute : %s — %s",
                     obs_id,
                     raw,
+                    parse_exc,
                 )
-                raise ValueError(f"Structured output parsing returned None. Raw: {raw}")
+                raise ValueError(f"JSON parsing failed: {parse_exc}. Raw: {raw}") from parse_exc
 
             logger.debug(
                 "[%s] Parsed: coicop_code=%s confiance=%d",
@@ -567,8 +672,17 @@ async def call_llm_async(
 # ── Mode batch ────────────────────────────────────────────────────────────────
 
 
-def _save_parquet(records: list[dict], path: Path | str) -> None:
-    _write_parquet(pd.DataFrame(records), path)
+def _save_parquet(
+    records: list[dict],
+    path: Path | str,
+    source_df: pd.DataFrame | None = None,
+) -> None:
+    out = pd.DataFrame(records)
+    if source_df is not None:
+        # Merge input columns (left) with LLM columns (right).
+        # how="right" keeps only processed rows (subset at checkpoint time).
+        out = source_df.merge(out, on="id", how="right")
+    _write_parquet(out, path)
 
 
 async def run_batch(
@@ -576,7 +690,7 @@ async def run_batch(
     nomenclature: pd.DataFrame,
     model: str,
     concurrency: int,
-    output_file: Path,
+    output_file: Path | str,
     full_nomen: bool = False,
 ) -> None:
     import sys
@@ -591,7 +705,9 @@ async def run_batch(
     try:
         existing = _read_parquet(output_file_str)
         done_ids = set(existing["id"].tolist())
-        results = existing.to_dict(orient="records")
+        # Keep only LLM columns — input columns are re-joined from df at save time
+        llm_cols = ["id"] + [c for c in existing.columns if c.startswith("llm_")]
+        results = existing[llm_cols].to_dict(orient="records")
         logger.info(
             "Reprise : %d observations déjà traitées, %d restantes.",
             len(done_ids),
@@ -646,7 +762,7 @@ async def run_batch(
                 total_prompt_tokens += result.get("llm_prompt_tokens") or 0
                 total_completion_tokens += result.get("llm_completion_tokens") or 0
             if len(results) % CHECKPOINT_EVERY == 0:
-                _save_parquet(results, output_file)
+                _save_parquet(results, output_file, source_df=df)
                 elapsed = time.perf_counter() - batch_t0
                 rate = len(results) / elapsed if elapsed > 0 else 0
                 logger.info(
@@ -668,7 +784,7 @@ async def run_batch(
     await asyncio.gather(*tasks)
     pbar.close()
 
-    _save_parquet(results, output_file)
+    _save_parquet(results, output_file, source_df=df)
 
     elapsed = time.perf_counter() - batch_t0
     n_ok = len(results) - n_errors

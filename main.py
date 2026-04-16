@@ -340,6 +340,7 @@ def cmd_decide_coicop(args: argparse.Namespace) -> None:
         load_nomenclature,
         print_result,
         run_batch,
+        try_consensus_decision,
     )
 
     if not os.environ.get("OPENAI_API_KEY"):
@@ -364,14 +365,22 @@ def cmd_decide_coicop(args: argparse.Namespace) -> None:
             api_kwargs["base_url"] = base_url
         client = OpenAI(**api_kwargs)
 
-        logger.info(
-            "Appel au modèle %s pour id=%s (nomen=%s)...",
-            args.model,
-            args.id,
-            "complète" if args.full_nomenclature else "filtrée",
-        )
-        prompt = build_prompt(obs, nomenclature, full_nomen=args.full_nomenclature)
-        decision = call_llm_sync(prompt, args.model, client)
+        decision = try_consensus_decision(obs, nomenclature)
+        if decision is not None:
+            logger.info(
+                "Consensus détecté pour id=%s — LLM ignoré (code=%s)",
+                args.id,
+                decision.coicop_code,
+            )
+        else:
+            logger.info(
+                "Appel au modèle %s pour id=%s (nomen=%s)...",
+                args.model,
+                args.id,
+                "complète" if args.full_nomenclature else "filtrée",
+            )
+            prompt = build_prompt(obs, nomenclature, full_nomen=args.full_nomenclature)
+            decision = call_llm_sync(prompt, args.model, client)
 
         if args.output == "json":
             print(
@@ -402,7 +411,7 @@ def cmd_decide_coicop(args: argparse.Namespace) -> None:
             nomenclature=nomenclature,
             model=args.model,
             concurrency=args.concurrency,
-            output_file=Path(args.output_file),
+            output_file=args.output_file,
             full_nomen=args.full_nomenclature,
         )
     )
